@@ -1,13 +1,15 @@
 import sys
 import os
 import stat
+import shutil
 import importlib
 import threading
 import queue
 import pathlib
 import zipfile
+import datetime
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
 
 REQUIRED_PACKAGES = ["cryptography"]
@@ -107,6 +109,14 @@ def is_file_in_use(path: pathlib.Path) -> bool:
             return False
 
 
+def format_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes}B"
+    if size_bytes < 1024 ** 2:
+        return f"{size_bytes / 1024:.1f}K"
+    return f"{size_bytes / 1024 ** 2:.1f}M"
+
+
 class CryptographicEngine:
 
     def generate_key(self) -> bytes:
@@ -137,18 +147,15 @@ class CryptographicEngine:
         total_size = resolved_source.stat().st_size
         bytes_read = 0
         chunks = []
-        try:
-            with open(resolved_source, "rb") as src:
-                while True:
-                    chunk = src.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    bytes_read += len(chunk)
-                    if progress_callback and total_size > 0:
-                        progress_callback(bytes_read / total_size * 50)
-        finally:
-            pass
+        with open(resolved_source, "rb") as src:
+            while True:
+                chunk = src.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                bytes_read += len(chunk)
+                if progress_callback and total_size > 0:
+                    progress_callback(bytes_read / total_size * 50)
         plaintext = b"".join(chunks)
         del chunks
         ciphertext = fernet.encrypt(plaintext)
@@ -175,18 +182,15 @@ class CryptographicEngine:
         total_size = resolved_source.stat().st_size
         bytes_read = 0
         chunks = []
-        try:
-            with open(resolved_source, "rb") as src:
-                while True:
-                    chunk = src.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    bytes_read += len(chunk)
-                    if progress_callback and total_size > 0:
-                        progress_callback(bytes_read / total_size * 50)
-        finally:
-            pass
+        with open(resolved_source, "rb") as src:
+            while True:
+                chunk = src.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                bytes_read += len(chunk)
+                if progress_callback and total_size > 0:
+                    progress_callback(bytes_read / total_size * 50)
         ciphertext = b"".join(chunks)
         del chunks
         try:
@@ -253,8 +257,6 @@ class CryptographicEngine:
                 seen.add(resolved)
                 if kf.name == exact_name:
                     candidates.insert(0, kf)
-                elif kf.name == DEFAULT_KEY_NAME:
-                    candidates.append(kf)
                 else:
                     candidates.append(kf)
         return candidates
@@ -362,7 +364,6 @@ class ToggleButton(tk.Frame):
                  on_change=None, **kwargs):
         super().__init__(parent, bg=bg_color, **kwargs)
         self._colors = colors
-        self._bg = bg_color
         self._on_change = on_change
         self._state = False
 
@@ -614,6 +615,14 @@ class ContextMenu(tk.Menu):
         tree.bind("<Button-3>", self._show)
         if sys.platform == "darwin":
             tree.bind("<Button-2>", self._show)
+        app.bind("<Button-1>", self._dismiss, add="+")
+        app.bind("<Escape>", self._dismiss, add="+")
+
+    def _dismiss(self, _event=None):
+        try:
+            self.unpost()
+        except Exception:
+            pass
 
     def _show(self, event):
         row = self._tree.identify_row(event.y)
@@ -629,6 +638,13 @@ class ContextMenu(tk.Menu):
             self.add_command(label="Encrypt Selected",
                              command=self._app._initiate_encrypt)
             self.add_separator()
+            self.add_command(label="Rename",
+                             command=lambda: self._rename_file(row))
+            self.add_command(label="Move to...",
+                             command=lambda: self._move_file(row))
+            self.add_command(label="Compress (zip)",
+                             command=lambda: self._compress_file(row))
+            self.add_separator()
             self.add_command(label="Properties",
                              command=lambda: self._show_properties(row))
             self.add_separator()
@@ -642,6 +658,13 @@ class ContextMenu(tk.Menu):
                              command=self._app._initiate_decrypt)
             self.add_command(label="Find Key",
                              command=lambda: self._find_key(row))
+            self.add_separator()
+            self.add_command(label="Rename",
+                             command=lambda: self._rename_file(row))
+            self.add_command(label="Move to...",
+                             command=lambda: self._move_file(row))
+            self.add_command(label="Compress (zip)",
+                             command=lambda: self._compress_file(row))
             self.add_separator()
             self.add_command(label="Properties",
                              command=lambda: self._show_properties(row))
@@ -657,6 +680,11 @@ class ContextMenu(tk.Menu):
             self.add_command(label="Use for Decryption",
                              command=lambda: self._use_for_decrypt(row))
             self.add_separator()
+            self.add_command(label="Rename",
+                             command=lambda: self._rename_file(row))
+            self.add_command(label="Move to...",
+                             command=lambda: self._move_file(row))
+            self.add_separator()
             self.add_command(label="Properties",
                              command=lambda: self._show_properties(row))
             self.add_separator()
@@ -668,6 +696,70 @@ class ContextMenu(tk.Menu):
         finally:
             self.grab_release()
 
+    def _rename_file(self, iid: str):
+        path = pathlib.Path(iid)
+        if not path.exists():
+            messagebox.showerror("Not Found", "File no longer exists.")
+            return
+        new_name = simpledialog.askstring(
+            "Rename",
+            f"New name for: {path.name}",
+            initialvalue=path.name,
+            parent=self._app)
+        if not new_name or new_name.strip() == path.name:
+            return
+        new_name = new_name.strip()
+        dest = path.parent / new_name
+        if dest.exists():
+            messagebox.showerror("Name Taken",
+                                  f"A file named '{new_name}' already exists in this folder.")
+            return
+        try:
+            path.rename(dest)
+            self._app._append_log(f"Renamed: {path.name} -> {dest.name}")
+            self._app._refresh_file_list()
+        except Exception:
+            messagebox.showerror("Error", "Could not rename the file.")
+
+    def _move_file(self, iid: str):
+        path = pathlib.Path(iid)
+        if not path.exists():
+            messagebox.showerror("Not Found", "File no longer exists.")
+            return
+        dest_dir = filedialog.askdirectory(title="Move file to...",
+                                            initialdir=str(path.parent))
+        if not dest_dir:
+            return
+        dest = pathlib.Path(dest_dir) / path.name
+        if dest.exists():
+            if not messagebox.askyesno("Overwrite?",
+                                        f"'{path.name}' already exists in the destination.\nOverwrite?"):
+                return
+        try:
+            shutil.move(str(path), str(dest))
+            self._app._append_log(f"Moved: {path.name} -> {dest_dir}")
+            self._app._refresh_file_list()
+        except Exception:
+            messagebox.showerror("Error", "Could not move the file.")
+
+    def _compress_file(self, iid: str):
+        path = pathlib.Path(iid)
+        if not path.exists():
+            messagebox.showerror("Not Found", "File no longer exists.")
+            return
+        zip_path = path.parent / (path.name + ".zip")
+        if zip_path.exists():
+            if not messagebox.askyesno("Overwrite?",
+                                        f"'{zip_path.name}' already exists.\nOverwrite?"):
+                return
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(path, path.name)
+            self._app._append_log(f"Compressed: {path.name} -> {zip_path.name}")
+            self._app._refresh_file_list()
+        except Exception:
+            messagebox.showerror("Error", "Could not compress the file.")
+
     def _show_properties(self, iid: str):
         path = pathlib.Path(iid)
         c = self._app._colors
@@ -677,16 +769,18 @@ class ContextMenu(tk.Menu):
         s = path.stat()
         size_b = s.st_size
         size_str = (f"{size_b} bytes" if size_b < 1024
-                    else f"{size_b/1024:.1f} KB" if size_b < 1024**2
-                    else f"{size_b/1024**2:.2f} MB")
-        import datetime
+                    else f"{size_b / 1024:.1f} KB" if size_b < 1024 ** 2
+                    else f"{size_b / 1024 ** 2:.2f} MB")
         mtime = datetime.datetime.fromtimestamp(s.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        info = (f"Name:     {path.name}\n"
-                f"Location: {path.parent}\n"
-                f"Size:     {size_str}\n"
-                f"Modified: {mtime}\n"
-                f"Readable: {'Yes' if os.access(path, os.R_OK) else 'No'}\n"
-                f"Writable: {'Yes' if os.access(path, os.W_OK) else 'No'}")
+        ctime = datetime.datetime.fromtimestamp(s.st_ctime).strftime("%Y-%m-%d %H:%M:%S")
+        info = (f"Name:      {path.name}\n"
+                f"Extension: {path.suffix or '(none)'}\n"
+                f"Location:  {path.parent}\n"
+                f"Size:      {size_str}\n"
+                f"Modified:  {mtime}\n"
+                f"Created:   {ctime}\n"
+                f"Readable:  {'Yes' if os.access(path, os.R_OK) else 'No'}\n"
+                f"Writable:  {'Yes' if os.access(path, os.W_OK) else 'No'}")
         win = tk.Toplevel(self._app)
         win.title("Properties")
         win.resizable(False, False)
@@ -698,7 +792,7 @@ class ContextMenu(tk.Menu):
         tk.Label(f, text=path.name, bg=c["bg"], fg=c["fg"],
                  font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 8))
         tk.Label(f, text=info, bg=c["bg"], fg=c["muted"],
-                 font=("Segoe UI", 9), justify="left").pack(anchor="w")
+                 font=("Courier", 9), justify="left").pack(anchor="w")
         ttk.Button(f, text="Close", style="Secondary.TButton",
                    command=win.destroy).pack(anchor="e", pady=(14, 0))
 
@@ -734,6 +828,28 @@ class ContextMenu(tk.Menu):
         self._app.dec_key_var.set(iid)
 
 
+class KeyInfoLabel(tk.Frame):
+
+    def __init__(self, parent, colors: dict, **kwargs):
+        super().__init__(parent, bg=colors["surface"], **kwargs)
+        self._colors = colors
+        self._name_lbl = tk.Label(self, bg=colors["surface"], fg=colors["fg"],
+                                   font=("Segoe UI", 9, "bold"), anchor="w")
+        self._name_lbl.pack(anchor="w")
+        self._path_lbl = tk.Label(self, bg=colors["surface"], fg=colors["muted"],
+                                   font=("Segoe UI", 7), anchor="w")
+        self._path_lbl.pack(anchor="w")
+
+    def set_key(self, key_path_str: str):
+        if not key_path_str.strip():
+            self._name_lbl.configure(text="No key selected")
+            self._path_lbl.configure(text="")
+            return
+        p = pathlib.Path(key_path_str)
+        self._name_lbl.configure(text=p.name)
+        self._path_lbl.configure(text=str(p.parent))
+
+
 class MemocryApp(tk.Tk):
 
     def __init__(self):
@@ -763,12 +879,12 @@ class MemocryApp(tk.Tk):
         self.update_idletasks()
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        w = min(max(self.winfo_reqwidth() + 80, 1100), screen_w - 60)
+        w = min(max(self.winfo_reqwidth() + 80, 1120), screen_w - 60)
         h = min(max(self.winfo_reqheight() + 80, 760), screen_h - 60)
         x = (screen_w - w) // 2
         y = (screen_h - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
-        self.minsize(960, 680)
+        self.minsize(980, 680)
 
     def _apply_theme(self):
         style = ttk.Style(self)
@@ -823,7 +939,7 @@ class MemocryApp(tk.Tk):
                         font=("Segoe UI", 10, "bold"), relief="flat", padding=(12, 7))
         style.map("Success.TButton", background=[("active", "#c3f0be")])
         style.configure("TProgressbar", troughcolor=surface, background=accent,
-                        thickness=5, borderwidth=0)
+                        thickness=6, borderwidth=0)
         style.configure("TSeparator", background="#3a3a52")
 
     def _build_layout(self):
@@ -835,8 +951,13 @@ class MemocryApp(tk.Tk):
 
         header = tk.Frame(self, bg=c["bg"], padx=20, pady=8)
         header.pack(fill="x")
-        tk.Label(header, text="memocry", bg=c["bg"], fg=c["fg"],
+
+        left_header = tk.Frame(header, bg=c["bg"])
+        left_header.pack(side="left")
+        tk.Label(left_header, text="memocry", bg=c["bg"], fg=c["fg"],
                  font=("Segoe UI", 16, "bold")).pack(side="left")
+        ttk.Button(left_header, text="Refresh", style="Secondary.TButton",
+                   command=self._refresh_file_list).pack(side="left", padx=(12, 0))
 
         folder_frame = tk.Frame(header, bg=c["bg"])
         folder_frame.pack(side="right")
@@ -867,14 +988,18 @@ class MemocryApp(tk.Tk):
         self._build_right_panel(right, c)
 
         ttk.Separator(self, orient="horizontal").pack(fill="x")
-        status_bar = tk.Frame(self, bg=c["surface"], padx=16, pady=6)
+        status_bar = tk.Frame(self, bg=c["surface"], padx=16, pady=0)
         status_bar.pack(fill="x", side="bottom")
+
         self.status_var = tk.StringVar(value="Ready.")
         tk.Label(status_bar, textvariable=self.status_var, bg=c["surface"], fg=c["muted"],
-                 font=("Segoe UI", 9)).pack(side="left")
+                 font=("Segoe UI", 9)).pack(side="left", pady=6)
+
         self.progress_var = tk.DoubleVar(value=0)
-        ttk.Progressbar(status_bar, variable=self.progress_var,
-                        maximum=100, length=180, style="TProgressbar").pack(side="right")
+        self._progress_bar = ttk.Progressbar(status_bar, variable=self.progress_var,
+                                              maximum=100, length=200, style="TProgressbar")
+        self._progress_bar.pack(side="right", pady=6, padx=(0, 0))
+        self._progress_bar.pack_forget()
 
     def _build_top_bar(self):
         c = self._colors
@@ -890,13 +1015,14 @@ class MemocryApp(tk.Tk):
             ("Delete key after encrypt", "_toggle_delete_key_after_encrypt"),
             ("Delete key after decrypt", "_toggle_delete_key_after_decrypt"),
             ("Extra warnings", "_toggle_warnings"),
+            ("No warnings", "_toggle_no_warnings"),
         ]
         for label, attr in toggles:
             t = ToggleButton(bar, label, c["surface"], c)
-            t.pack(side="left", padx=(0, 18))
+            t.pack(side="left", padx=(0, 16))
             setattr(self, attr, t)
 
-        tk.Frame(bar, bg=c["surface"], width=1).pack(side="left", fill="y", padx=(8, 12))
+        tk.Frame(bar, bg="#3a3a52", width=1).pack(side="left", fill="y", padx=(4, 12))
 
         tk.Label(bar, text="Log", bg=c["surface"], fg=c["muted"],
                  font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 6))
@@ -924,8 +1050,6 @@ class MemocryApp(tk.Tk):
                  font=("Segoe UI", 10, "bold")).pack(side="left")
         tk.Label(enc_hdr, text="  Ctrl/Shift+click", bg=c["bg"], fg=c["muted"],
                  font=("Segoe UI", 7)).pack(side="left")
-        ttk.Button(enc_hdr, text="Refresh", style="Secondary.TButton",
-                   command=self._refresh_file_list).pack(side="right")
 
         key_hdr = tk.Frame(parent, bg=c["bg"])
         key_hdr.grid(row=0, column=2, sticky="ew", pady=(0, 4))
@@ -934,13 +1058,17 @@ class MemocryApp(tk.Tk):
 
         plain_outer = tk.Frame(parent, bg=c["surface"])
         plain_outer.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
-        plain_cols = ("name", "size")
+        plain_cols = ("type", "name", "ext", "size")
         self.plain_tree = ttk.Treeview(plain_outer, columns=plain_cols,
                                         show="headings", selectmode="extended")
-        self.plain_tree.heading("name", text="File")
+        self.plain_tree.heading("type", text="")
+        self.plain_tree.heading("name", text="Name")
+        self.plain_tree.heading("ext", text="Ext")
         self.plain_tree.heading("size", text="Size")
-        self.plain_tree.column("name", width=200, minwidth=120)
-        self.plain_tree.column("size", width=65, anchor="e")
+        self.plain_tree.column("type", width=30, minwidth=30, anchor="center", stretch=False)
+        self.plain_tree.column("name", width=160, minwidth=100)
+        self.plain_tree.column("ext", width=42, minwidth=36, anchor="center", stretch=False)
+        self.plain_tree.column("size", width=54, anchor="e", stretch=False)
         ps = ttk.Scrollbar(plain_outer, orient="vertical", command=self.plain_tree.yview)
         self.plain_tree.configure(yscrollcommand=ps.set)
         self.plain_tree.pack(side="left", fill="both", expand=True)
@@ -949,15 +1077,19 @@ class MemocryApp(tk.Tk):
 
         enc_outer = tk.Frame(parent, bg=c["surface"])
         enc_outer.grid(row=1, column=1, sticky="nsew", padx=(0, 6))
-        enc_cols = ("file", "key_status", "size")
+        enc_cols = ("type", "file", "ext", "key_status", "size")
         self.file_tree = ttk.Treeview(enc_outer, columns=enc_cols,
                                        show="headings", selectmode="extended")
-        self.file_tree.heading("file", text="File")
+        self.file_tree.heading("type", text="")
+        self.file_tree.heading("file", text="Name")
+        self.file_tree.heading("ext", text="Ext")
         self.file_tree.heading("key_status", text="Key")
         self.file_tree.heading("size", text="Size")
-        self.file_tree.column("file", width=200, minwidth=120)
-        self.file_tree.column("key_status", width=55, anchor="center")
-        self.file_tree.column("size", width=65, anchor="e")
+        self.file_tree.column("type", width=30, minwidth=30, anchor="center", stretch=False)
+        self.file_tree.column("file", width=140, minwidth=90)
+        self.file_tree.column("ext", width=42, minwidth=36, anchor="center", stretch=False)
+        self.file_tree.column("key_status", width=52, anchor="center", stretch=False)
+        self.file_tree.column("size", width=54, anchor="e", stretch=False)
         es = ttk.Scrollbar(enc_outer, orient="vertical", command=self.file_tree.yview)
         self.file_tree.configure(yscrollcommand=es.set)
         self.file_tree.pack(side="left", fill="both", expand=True)
@@ -967,13 +1099,15 @@ class MemocryApp(tk.Tk):
 
         key_outer = tk.Frame(parent, bg=c["surface"])
         key_outer.grid(row=1, column=2, sticky="nsew")
-        key_cols = ("key_name", "location")
+        key_cols = ("key_name", "key_size", "key_modified")
         self.key_tree = ttk.Treeview(key_outer, columns=key_cols,
                                       show="headings", selectmode="browse")
         self.key_tree.heading("key_name", text="Key File")
-        self.key_tree.heading("location", text="Location")
-        self.key_tree.column("key_name", width=130, minwidth=80)
-        self.key_tree.column("location", width=120, minwidth=80)
+        self.key_tree.heading("key_size", text="Size")
+        self.key_tree.heading("key_modified", text="Modified")
+        self.key_tree.column("key_name", width=120, minwidth=80)
+        self.key_tree.column("key_size", width=50, anchor="e", stretch=False)
+        self.key_tree.column("key_modified", width=110, minwidth=80, anchor="center")
         ks2 = ttk.Scrollbar(key_outer, orient="vertical", command=self.key_tree.yview)
         self.key_tree.configure(yscrollcommand=ks2.set)
         self.key_tree.pack(side="left", fill="both", expand=True)
@@ -1001,7 +1135,9 @@ class MemocryApp(tk.Tk):
 
     def _build_right_panel(self, parent, c):
         tk.Label(parent, text="Operations", bg=c["bg"], fg=c["fg"],
-                 font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 8))
+                 font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 4))
+        ttk.Button(parent, text="Refresh", style="Secondary.TButton",
+                   command=self._refresh_file_list).pack(anchor="w", pady=(0, 8))
 
         enc_card = tk.Frame(parent, bg=c["surface"], padx=14, pady=12)
         enc_card.pack(fill="x", pady=(0, 8))
@@ -1011,12 +1147,15 @@ class MemocryApp(tk.Tk):
         tk.Label(enc_card, text="Key file:", bg=c["surface"], fg=c["muted"],
                  font=("Segoe UI", 9)).pack(anchor="w")
         enc_key_row = tk.Frame(enc_card, bg=c["surface"])
-        enc_key_row.pack(fill="x", pady=(2, 6))
+        enc_key_row.pack(fill="x", pady=(2, 4))
         self.enc_key_var = tk.StringVar()
+        self.enc_key_var.trace_add("write", self._on_enc_key_changed)
         ttk.Entry(enc_key_row, textvariable=self.enc_key_var, width=15).pack(side="left",
                                                                                expand=True, fill="x")
         ttk.Button(enc_key_row, text="...", style="Secondary.TButton", width=3,
                    command=self._browse_enc_key).pack(side="right", padx=(4, 0))
+        self._enc_key_info = KeyInfoLabel(enc_card, c)
+        self._enc_key_info.pack(fill="x", pady=(0, 6))
         tk.Label(enc_card, text="Select rows or browse files",
                  bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 4))
         ttk.Button(enc_card, text="Browse Files", style="Secondary.TButton",
@@ -1032,12 +1171,15 @@ class MemocryApp(tk.Tk):
         tk.Label(dec_card, text="Key file:", bg=c["surface"], fg=c["muted"],
                  font=("Segoe UI", 9)).pack(anchor="w")
         dec_key_row = tk.Frame(dec_card, bg=c["surface"])
-        dec_key_row.pack(fill="x", pady=(2, 6))
+        dec_key_row.pack(fill="x", pady=(2, 4))
         self.dec_key_var = tk.StringVar()
+        self.dec_key_var.trace_add("write", self._on_dec_key_changed)
         ttk.Entry(dec_key_row, textvariable=self.dec_key_var, width=15).pack(side="left",
                                                                                expand=True, fill="x")
         ttk.Button(dec_key_row, text="...", style="Secondary.TButton", width=3,
                    command=self._browse_dec_key).pack(side="right", padx=(4, 0))
+        self._dec_key_info = KeyInfoLabel(dec_card, c)
+        self._dec_key_info.pack(fill="x", pady=(0, 6))
         tk.Label(dec_card, text="Select rows or browse files",
                  bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 4))
         ttk.Button(dec_card, text="Browse Files", style="Secondary.TButton",
@@ -1059,6 +1201,12 @@ class MemocryApp(tk.Tk):
                  bg=c["surface"], fg=c["warning"],
                  font=("Segoe UI", 8), justify="left").pack(anchor="w")
 
+    def _on_enc_key_changed(self, *_):
+        self._enc_key_info.set_key(self.enc_key_var.get())
+
+    def _on_dec_key_changed(self, *_):
+        self._dec_key_info.set_key(self.dec_key_var.get())
+
     def _toggle_log_panel(self):
         self._log_open = not self._log_open
         if self._log_open:
@@ -1068,8 +1216,14 @@ class MemocryApp(tk.Tk):
             self._log_panel_frame.grid_remove()
             self._log_btn.configure(text="Show")
 
-    def _set_status(self, message: str, _color_key: str = "muted"):
+    def _set_status(self, message: str):
         self.status_var.set(message)
+
+    def _show_progress(self):
+        self._progress_bar.pack(side="right", pady=6)
+
+    def _hide_progress(self):
+        self._progress_bar.pack_forget()
 
     def _append_log(self, message: str):
         self._session_log.append(message)
@@ -1091,28 +1245,43 @@ class MemocryApp(tk.Tk):
 
         for item in self.scanner.discover_encrypted_files():
             enc_file = item["encrypted_file"]
-            size_kb = item["size_bytes"] / 1024
-            size_lbl = f"{size_kb:.1f}K" if size_kb < 1024 else f"{size_kb/1024:.1f}M"
+            size_lbl = format_size(item["size_bytes"])
             tag = "keyed" if item["key_status"] == "Found" else "unkeyed"
+            suffix = enc_file.suffix
+            stem_suffix = pathlib.Path(enc_file.stem).suffix
+            ext_display = stem_suffix + suffix if stem_suffix else suffix
+            try:
+                rel = enc_file.relative_to(self.family_folder)
+                name_display = str(rel.with_suffix("").with_suffix("")) if rel.suffixes else str(rel)
+            except ValueError:
+                name_display = enc_file.stem
             self.file_tree.insert("", "end", iid=str(enc_file),
-                                   values=(item["display_name"], item["key_status"], size_lbl),
+                                   values=("F", name_display, ext_display,
+                                           item["key_status"], size_lbl),
                                    tags=(tag,))
         self.file_tree.tag_configure("keyed", foreground=self._colors["success"])
         self.file_tree.tag_configure("unkeyed", foreground=self._colors["danger"])
 
         for plain_file in self.scanner.discover_plain_files():
-            size_kb = plain_file.stat().st_size / 1024
-            size_lbl = f"{size_kb:.1f}K" if size_kb < 1024 else f"{size_kb/1024:.1f}M"
+            size_lbl = format_size(plain_file.stat().st_size)
             try:
                 rel = plain_file.relative_to(self.family_folder)
             except ValueError:
                 rel = plain_file
+            is_dir_item = False
+            ext = plain_file.suffix
+            name_no_ext = plain_file.stem
+            type_icon = "D" if is_dir_item else "F"
             self.plain_tree.insert("", "end", iid=str(plain_file),
-                                    values=(str(rel), size_lbl))
+                                    values=(type_icon, str(rel.parent / name_no_ext)
+                                            if str(rel.parent) != "." else name_no_ext,
+                                            ext, size_lbl))
 
         for kf in self.scanner.discover_key_files():
+            size_lbl = format_size(kf.stat().st_size)
+            mtime = datetime.datetime.fromtimestamp(kf.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
             self.key_tree.insert("", "end", iid=str(kf),
-                                  values=(kf.name, str(kf.parent)))
+                                  values=(kf.name, size_lbl, mtime))
 
         self._set_status(f"Scanned: {self.family_folder}")
 
@@ -1148,11 +1317,14 @@ class MemocryApp(tk.Tk):
             zip_out = folder.parent / (folder.name + ".zip")
             try:
                 self.engine.zip_folder(folder, zip_out)
-                if zip_out not in self._enc_manual_files:
-                    self._enc_manual_files.append(zip_out)
-                self._append_log(f"Folder zipped: {zip_out.name} queued for encryption.")
             except Exception:
                 messagebox.showerror("Zip Failed", "Could not create zip archive.")
+                return
+            if zip_out not in self._enc_manual_files:
+                self._enc_manual_files.append(zip_out)
+            self._refresh_file_list()
+            self._append_log(f"Folder zipped: {zip_out.name} queued for encryption.")
+            self._append_log("Click Encrypt Selected to encrypt the zip archive.")
         else:
             added = 0
             for f in sorted(folder.rglob("*")):
@@ -1174,7 +1346,7 @@ class MemocryApp(tk.Tk):
         c = self._colors
         f = tk.Frame(win, bg=c["bg"], padx=22, pady=18)
         f.pack()
-        tk.Label(f, text=f"How to encrypt folder: {folder_name}",
+        tk.Label(f, text=f"How to encrypt: {folder_name}",
                  bg=c["bg"], fg=c["fg"], font=("Segoe UI", 11, "bold")).pack(anchor="w")
         tk.Label(f, text="Choose how the folder contents should be encrypted:",
                  bg=c["bg"], fg=c["muted"], font=("Segoe UI", 9)).pack(anchor="w", pady=(6, 12))
@@ -1186,7 +1358,7 @@ class MemocryApp(tk.Tk):
         ttk.Button(f, text="Encrypt each file individually",
                    style="Secondary.TButton",
                    command=lambda: pick("files")).pack(fill="x", pady=(0, 6))
-        ttk.Button(f, text="Zip folder then encrypt the zip",
+        ttk.Button(f, text="Zip folder, then encrypt the zip",
                    style="Accent.TButton",
                    command=lambda: pick("zip")).pack(fill="x", pady=(0, 6))
         ttk.Button(f, text="Cancel",
@@ -1289,6 +1461,11 @@ class MemocryApp(tk.Tk):
             messagebox.showwarning("Partial Deletion",
                                     f"{deleted} deleted, {failed} could not be deleted.")
 
+    def _warnings_active(self) -> bool:
+        if self._toggle_no_warnings.value:
+            return False
+        return self._toggle_warnings.value
+
     def _check_pre_encrypt_warnings(self, source_paths: list[pathlib.Path],
                                      active_key_path: pathlib.Path) -> bool:
         warnings = []
@@ -1313,19 +1490,20 @@ class MemocryApp(tk.Tk):
                 f"Key file(s) are included in the selection:\n{names}\n\n"
                 "Encrypting a key without a backup makes it permanently inaccessible.")
 
-        system_files = [p for p in source_paths if is_system_file(p)]
-        if system_files:
-            names = ", ".join(p.name for p in system_files[:5])
-            warnings.append(
-                f"The following file(s) appear to be system files:\n{names}\n\n"
-                "Encrypting system files may cause your operating system to malfunction.")
+        if not self._toggle_no_warnings.value:
+            system_files = [p for p in source_paths if is_system_file(p)]
+            if system_files:
+                names = ", ".join(p.name for p in system_files[:5])
+                warnings.append(
+                    f"The following file(s) appear to be system files:\n{names}\n\n"
+                    "Encrypting system files may cause your operating system to malfunction.")
 
-        in_use = [p for p in source_paths if is_file_in_use(p)]
-        if in_use:
-            names = ", ".join(p.name for p in in_use[:5])
-            warnings.append(
-                f"The following file(s) appear to be in use by another process:\n{names}\n\n"
-                "Encrypting files that are currently open may cause data corruption.")
+            in_use = [p for p in source_paths if is_file_in_use(p)]
+            if in_use:
+                names = ", ".join(p.name for p in in_use[:5])
+                warnings.append(
+                    f"The following file(s) appear to be in use by another process:\n{names}\n\n"
+                    "Encrypting files that are currently open may cause data corruption.")
 
         if warnings:
             full = "\n\n".join(warnings) + "\n\nContinue anyway?"
@@ -1390,7 +1568,7 @@ class MemocryApp(tk.Tk):
         if not self._check_pre_encrypt_warnings(targets, key_path):
             return
 
-        if self._toggle_warnings.value:
+        if self._warnings_active():
             if not messagebox.askyesno(
                     "Confirm Encryption",
                     f"Encrypt {len(targets)} file(s) using:\n{key_path.name}\n\nProceed?"):
@@ -1399,14 +1577,14 @@ class MemocryApp(tk.Tk):
         delete_source = self._toggle_delete_after_encrypt.value
         delete_key = self._toggle_delete_key_after_encrypt.value
 
-        if delete_source and self._toggle_warnings.value:
+        if delete_source and self._warnings_active():
             if not messagebox.askyesno(
                     "Delete Source",
                     f"'Delete source after encrypt' is ON.\n"
                     f"Original {len(targets)} file(s) will be deleted.\n\nContinue?"):
                 return
 
-        if delete_key and self._toggle_warnings.value:
+        if delete_key and self._warnings_active():
             if not messagebox.askyesno(
                     "Delete Key",
                     f"'Delete key after encrypt' is ON.\n"
@@ -1486,7 +1664,7 @@ class MemocryApp(tk.Tk):
                                   "Select files from the Encrypted Files list or use Browse Files.")
             return
 
-        if self._toggle_warnings.value:
+        if self._warnings_active():
             if not messagebox.askyesno(
                     "Confirm Decryption",
                     f"Decrypt {len(targets)} file(s) using:\n{key_path.name}\n\nProceed?"):
@@ -1495,14 +1673,14 @@ class MemocryApp(tk.Tk):
         delete_source = self._toggle_delete_after_decrypt.value
         delete_key = self._toggle_delete_key_after_decrypt.value
 
-        if delete_source and self._toggle_warnings.value:
+        if delete_source and self._warnings_active():
             if not messagebox.askyesno(
                     "Delete Encrypted Files",
                     f"'Delete .enc after decrypt' is ON.\n"
                     f"{len(targets)} encrypted file(s) will be deleted.\n\nContinue?"):
                 return
 
-        if delete_key and self._toggle_warnings.value:
+        if delete_key and self._warnings_active():
             if not messagebox.askyesno(
                     "Delete Key",
                     f"'Delete key after decrypt' is ON.\n"
@@ -1565,6 +1743,7 @@ class MemocryApp(tk.Tk):
     def _run_batch(self, tasks: list, status_message: str):
         self.operation_in_progress = True
         self.progress_var.set(0)
+        self._show_progress()
         self._set_status(status_message)
         result_queue = queue.Queue()
         progress_queue = queue.Queue()
@@ -1594,6 +1773,7 @@ class MemocryApp(tk.Tk):
                 if msg_type == "done":
                     self.operation_in_progress = False
                     self.progress_var.set(0)
+                    self._hide_progress()
                     self._active_result_queue = None
                     self._active_progress_queue = None
 
@@ -1604,11 +1784,11 @@ class MemocryApp(tk.Tk):
 
                     self._refresh_file_list()
                     if not errors:
-                        self._set_status(f"Completed: {completed}/{total} file(s).")
+                        self._set_status(f"Done: {completed}/{total} file(s) processed.")
                         messagebox.showinfo("Complete",
                                              f"All {completed} file(s) processed successfully.")
                     else:
-                        self._set_status(f"Completed with errors: {completed}/{total}.")
+                        self._set_status(f"Done with errors: {completed}/{total}.")
                         messagebox.showwarning(
                             "Partial Completion",
                             f"{completed} of {total} processed.\n"
