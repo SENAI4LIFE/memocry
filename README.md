@@ -1,25 +1,19 @@
 # memocry
 
-A secure, self-contained Python utility for symmetric file-level encryption and decryption using authenticated Fernet cryptography.
-
----
-
-## Purpose
-
-memocry provides a portable, graphical encryption tool with zero persistent state. All configuration, keys, and operational data exist exclusively in volatile memory during execution. No logs, settings files, or temporary artifacts are written to disk at any point.
+A secure, self-contained Python utility for symmetric file-level encryption and decryption using authenticated Fernet cryptography. Zero persistent state. No configuration files. No logs written to disk.
 
 ---
 
 ## Requirements
 
 - Python 3.10 or later
-- `cryptography` library (installed into a virtual environment)
+- `cryptography` library
 
 ---
 
 ## Setup
 
-A virtual environment isolates the `cryptography` dependency from your system Python installation and is required before running memocry.
+Create and activate a virtual environment named `memo` before installing dependencies.
 
 ### Windows
 
@@ -37,35 +31,72 @@ source memo/bin/activate
 pip install cryptography
 ```
 
-The virtual environment only needs to be created once. On subsequent uses, activate it with the same `activate` command before running the application.
-
-memocry performs a dependency check at startup and will print installation instructions if the library is missing.
+The environment only needs to be created once. Activate it before each session with the same `activate` command.
 
 ---
 
-## Running the Application
+## Running
 
-With the virtual environment active, execute from any directory:
+With the virtual environment active:
 
 ```
 python memocry.py
 ```
 
-No configuration files or setup steps beyond venv activation are required. All file system interactions use paths resolved dynamically at runtime.
+The window auto-sizes to fit all interface elements on launch. No configuration is required.
 
 ---
 
-## Interface Overview
+## Interface Layout
 
-The interface is divided into three zones.
+### Toggle Bar (top strip)
 
-**Top bar** - Displays and controls the active Family Folder, which is the monitored directory for automatic file and key discovery. Defaults to the working directory at launch.
+Five session-only toggle switches. Off by default. State resets on every restart, leaving no persistent footprint.
 
-**Center panel** - Lists all discovered encrypted files (`.enc`) alongside their key pairing status. A secondary list shows plain files available for encryption. Both lists update automatically on refresh.
+- **Delete source after encrypt** - Deletes the original plain file after successful encryption.
+- **Delete .enc after decrypt** - Deletes the encrypted file after successful decryption.
+- **Delete key after encrypt** - Deletes the active encryption key after the batch completes.
+- **Delete key after decrypt** - Deletes the active decryption key after the batch completes.
+- **Extra warnings** - Enables confirmation dialogs before every destructive action, including batch confirmation prompts. Recommended for interactive use.
 
-**Right sidebar** - Contains the Encrypt, Decrypt, and Key Management operation panels. Files can be selected from the lists or specified manually via browse dialogs.
+### Family Folder Bar
 
-**Status bar** - Displays operation status and a progress indicator for active tasks.
+Sets the monitored working directory. Use Browse to pick a folder, then Set to apply. The file lists refresh automatically. Use Add Folder to recursively queue an entire folder for encryption without changing the Family Folder itself.
+
+### Encrypted Files (left panel, top)
+
+Lists all `.enc` files discovered recursively within the Family Folder, showing their relative path, key pairing status, and size. Key status is color-coded: green means a matching key was found, red means missing. Supports Ctrl+click and Shift+click for multi-selection. Selecting a row auto-fills the Decrypt key field if a paired key is detected.
+
+### Plain Files (left panel, middle)
+
+Lists all non-encrypted, non-key files discovered recursively. Supports multi-selection for batch encryption.
+
+### Session Log (left panel, bottom)
+
+A volatile, RAM-only activity ledger. Records every operation outcome, skipped file, and deletion event. Purged on clear or on exit. Never written to disk.
+
+### Operations Panel (right sidebar)
+
+**ENCRYPT**
+- Key file: path to the Fernet key to use. Browse or type manually.
+- Browse Files: open a multi-file picker to queue additional files.
+- Encrypt Selected: encrypts all files selected in the Plain Files list plus any manually browsed files.
+- If no key is selected when clicking Encrypt, a prompt offers to generate one immediately.
+
+**DECRYPT**
+- Key file: path to the Fernet key to use. Browse or type manually.
+- Browse Files: open a multi-file picker for encrypted files outside the Family Folder.
+- Decrypt Selected: decrypts all files selected in the Encrypted Files list plus any manually browsed files.
+
+**KEY MANAGEMENT**
+- Generate & Save Key: opens a dialog to name the key, choose where to save it, and generate it using the system CSPRNG.
+- Delete All Detected Keys: permanently removes all `.key` files found recursively in the Family Folder. Requires double confirmation.
+
+---
+
+## Folder Encryption
+
+To encrypt an entire folder, click **Add Folder** in the folder bar. The application recursively collects every plain file in the chosen folder and queues them for the next Encrypt Selected operation. Key files and already-encrypted files are excluded automatically.
 
 ---
 
@@ -73,88 +104,68 @@ The interface is divided into three zones.
 
 ### Generating a Key
 
-1. Click **Generate New Key** in the Key Management panel.
-2. Confirm the action in the dialog.
-3. The key is saved as `encryption.key` in the current Family Folder.
+1. Click **Generate & Save Key** in the Key Management panel.
+2. Enter a file name and choose a save location.
+3. Click **Generate & Save**.
 
-> **Critical Warning:** The encryption key is the sole mechanism for recovering encrypted data. If the key file is lost, destroyed, or corrupted, the encrypted data becomes permanently and mathematically unrecoverable. There is no fallback, bypass, or recovery mechanism.
+The key is generated using a cryptographically secure pseudo-random number generator (CSPRNG) and saved to the chosen path. If no key is selected when starting encryption, the application prompts to generate one at that moment.
 
-**Back up your key immediately** to a secure, redundant location such as a password manager, encrypted USB drive, or physical vault. Do not store the key in the same location as the encrypted files.
+### Key Pairing
 
-### Key File Naming
+The Smart Key Mapper automatically pairs encrypted files with their keys:
+- A file named `document.pdf.enc` looks for `document.pdf.key` in the same directory first.
+- If no specific key is found, it falls back to `encryption.key` in the Family Folder root.
 
-By default, memocry uses `encryption.key` as the key filename. For automatic key pairing, a key named `<filename>.key` placed alongside `<filename>.enc` will be detected and associated automatically.
+### Key Safety Warning
 
----
+The encryption key is the sole mechanism for recovering encrypted data. If the key file is lost, destroyed, or corrupted, the encrypted data is permanently and mathematically unrecoverable. There is no bypass or recovery path.
 
-## Encrypting a File
-
-1. Ensure a key exists in the Family Folder (generate one if needed).
-2. Select a plain file from the lower list, or use the **...** button in the Encrypt panel to browse manually.
-3. Click **Encrypt File**.
-4. Confirm the dialog.
-
-The output file is saved as `<original_filename><extension>.enc` in the same directory. The original file is not modified or deleted.
+Back up keys immediately to a secure, separate location such as a password manager, encrypted USB drive, or physical vault. Do not store keys in the same location as the encrypted files.
 
 ---
 
-## Decrypting a File
+## Key File Warnings
 
-1. Select an encrypted file from the upper list (the key field is populated automatically if a paired key is found), or specify both paths manually using the browse buttons in the Decrypt panel.
-2. Click **Decrypt File**.
-3. Confirm the dialog.
-
-The output file is restored to its original filename by removing the `.enc` extension.
-
----
-
-## Family Folder
-
-The Family Folder is the directory memocry monitors for automatic discovery. It defaults to the working directory at launch. To change it:
-
-1. Enter a new path in the folder field in the top bar, or click **Browse**.
-2. Click **Set** to apply.
-
-Files outside the Family Folder can still be processed using manual path entry or browse dialogs.
+memocry warns before encrypting a `.key` file included in a selection. Encrypting a key file without a secure backup of that key - or encrypting the same key currently selected for the operation - will result in permanent data loss if the key cannot be recovered afterward.
 
 ---
 
 ## Security Model
 
-**Encryption algorithm:** Fernet (AES-128-CBC with HMAC-SHA256 authentication). Fernet guarantees that encrypted data cannot be read or modified without the correct key.
+**Algorithm:** Fernet (AES-128-CBC + HMAC-SHA256). Authenticated encryption. Any tampered or corrupted file will cause decryption to abort.
 
-**Key material handling:** Keys are loaded into volatile memory only for the duration of the cryptographic operation. References are nullified immediately upon task completion.
+**Key handling:** Key material is loaded into volatile memory only for the duration of the operation. References are explicitly nullified on completion.
 
-**No persistent state:** No settings, usage history, temporary files, or logs are written to disk at any time.
+**No persistence:** No settings, history, temporary files, or logs are written to disk at any time. All state is session-scoped and RAM-resident only.
 
-**File processing:** Files are processed using chunked stream reading (64 KB blocks) to maintain a constant memory footprint regardless of file size.
+**Stream processing:** Files are read in 64 KB chunks to maintain a constant memory footprint regardless of file size.
 
-**Atomic writes:** Output files are written to a temporary path first and atomically renamed upon successful completion, preventing partial or corrupted output if an operation is interrupted.
+**Atomic writes:** Output is staged to a `.tmp` path and atomically replaced on success. Partial output is cleaned up on failure.
 
-**Input validation:** All file paths are validated for existence, type, and permissions before any I/O operation begins. Path traversal inputs are rejected.
+**Input validation:** All file paths are validated before any I/O. Path traversal attempts and invalid file types are rejected.
 
-**Threading:** Cryptographic operations run on a background thread. The interface remains responsive during processing and displays a live progress indicator.
+**Background threading:** All cryptographic operations run on a dedicated daemon thread. The interface remains responsive with live progress reporting.
 
-**Data at rest:** Application-level file shredding is not implemented, as it is ineffective against modern storage wear-leveling and filesystem journaling. Security for data at rest should be enforced via operating system-level full-disk encryption.
+**Generic error messaging:** No stack traces or internal diagnostics are shown in the interface. Error reporting is intentionally high-level to prevent information leakage.
 
 ---
 
 ## Troubleshooting
 
-**"No Key Found" error during encryption**
-Generate a key using the Key Management panel before encrypting.
+**No key selected on encrypt click**
+A dialog will offer to generate one. Accept to open the key generation window, then retry.
 
-**"Operation Failed" during decryption**
-Verify that the key file matches the one used during encryption. Fernet keys are not interchangeable. Confirm the encrypted file has not been modified or corrupted.
+**Decryption failed**
+The key does not match the one used for encryption, or the file has been modified or corrupted. Verify you are using the correct key.
 
-**Files not appearing in the list**
-Ensure the correct Family Folder is set and click **Refresh**. Only files with the `.enc` extension appear in the encrypted file list.
+**Files not appearing in lists**
+Ensure the correct Family Folder is set and click Refresh. Plain files and encrypted files are discovered recursively.
 
 **Application not launching**
-Confirm Python 3.10+ is installed, the virtual environment is active, and the `cryptography` package is installed. Re-run `pip install cryptography` inside the active venv if needed.
+Confirm Python 3.10+ is installed, the `memo` virtual environment is active, and `cryptography` is installed. Re-run `pip install cryptography` inside the active environment if needed.
 
-**Output file already exists warning**
-A confirmation dialog is shown before overwriting any existing file. Decline to cancel the operation without data loss.
+**Key pairing shows Missing**
+No `.key` file matching the encrypted file's stem and no `encryption.key` in the Family Folder root were found. Locate the correct key file and specify it manually in the Decrypt key field.
 
 ---
 
