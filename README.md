@@ -48,7 +48,7 @@ The window auto-sizes to fit all interface elements on launch. No configuration 
 ---
 
 ## Interface Layout
-
+![Memocry v0.1.0 Screenshot](memocry%20v0.1.0.png)
 ### Toggle Bar (top strip)
 
 Five session-only toggle switches. Off by default. State resets on every restart, leaving no persistent footprint.
