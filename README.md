@@ -13,13 +13,11 @@ A self-contained, zero-footprint Python utility for symmetric file-level encrypt
 
 ## Setup
 
-### Option A — Virtual environment (recommended)
-
 ```bash
 python -m venv venv
 ```
 
-Activate it:
+Activate the environment:
 
 ```bash
 # Windows
@@ -30,12 +28,6 @@ source venv/bin/activate
 ```
 
 Install the dependency:
-
-```bash
-pip install cryptography
-```
-
-### Option B — System-wide
 
 ```bash
 pip install cryptography
