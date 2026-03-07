@@ -14,7 +14,7 @@ A self-contained, zero-footprint Python utility for symmetric file-level encrypt
 ## Setup
 
 ```bash
-python -m venv venv
+python3 -m venv venv
 ```
 
 Activate the environment:
