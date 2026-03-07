@@ -40,6 +40,11 @@ DEFAULT_KEY_NAME = "encryption.key"
 APP_TITLE = "memocry"
 SELF_PATH = pathlib.Path(__file__).resolve()
 
+ICON_FILE = "\U0001f4c4"
+ICON_FOLDER = "\U0001f4c1"
+ICON_ENCRYPTED = "\U0001f512"
+ICON_KEY = "\U0001f5dd"
+
 SYSTEM_PATH_PREFIXES = []
 if sys.platform.startswith("win"):
     SYSTEM_PATH_PREFIXES = [
@@ -239,6 +244,22 @@ class CryptographicEngine:
         if resolved.is_file():
             resolved.unlink()
 
+    def secure_wipe(self, file_path: pathlib.Path):
+        resolved = file_path.resolve()
+        if not resolved.is_file():
+            return
+        try:
+            size = resolved.stat().st_size
+            with open(resolved, "r+b") as f:
+                for _ in range(3):
+                    f.seek(0)
+                    f.write(os.urandom(size))
+                    f.flush()
+                    os.fsync(f.fileno())
+            resolved.unlink()
+        except Exception:
+            resolved.unlink()
+
     def find_candidate_keys(self, encrypted_path: pathlib.Path,
                              search_roots: list[pathlib.Path]) -> list[pathlib.Path]:
         stem = encrypted_path.stem
@@ -260,6 +281,13 @@ class CryptographicEngine:
                 else:
                     candidates.append(kf)
         return candidates
+
+    def verify_key_format(self, key_path: pathlib.Path) -> bool:
+        try:
+            raw = key_path.resolve().read_bytes().strip()
+            return self.validate_key_material(raw)
+        except Exception:
+            return False
 
 
 class PathValidator:
@@ -306,11 +334,9 @@ class FamilyFolderScanner:
             candidate_key = enc_file.parent / (stem + KEY_EXTENSION)
             paired_key = candidate_key if candidate_key.is_file() else None
             size_bytes = enc_file.stat().st_size
-            rel = enc_file.relative_to(self.family_folder)
             discovered.append({
                 "encrypted_file": enc_file,
                 "paired_key": paired_key,
-                "display_name": str(rel),
                 "key_status": "Found" if paired_key else "Missing",
                 "size_bytes": size_bytes,
             })
@@ -332,6 +358,15 @@ class FamilyFolderScanner:
         for f in sorted(self.family_folder.rglob(f"*{KEY_EXTENSION}")):
             if f.is_file():
                 results.append(f)
+        return results
+
+    def discover_subfolders(self) -> list[pathlib.Path]:
+        results = []
+        if not self.family_folder.exists():
+            return results
+        for d in sorted(self.family_folder.iterdir()):
+            if d.is_dir():
+                results.append(d)
         return results
 
 
@@ -373,7 +408,7 @@ class ToggleButton(tk.Frame):
         self._track.bind("<Button-1>", self._toggle)
 
         self._label = tk.Label(self, text=label, bg=bg_color,
-                               fg=colors["muted"], font=("Segoe UI", 8), cursor="hand2")
+                               fg=colors["muted"], font=("Segoe UI", 9), cursor="hand2")
         self._label.pack(side="left")
         self._label.bind("<Button-1>", self._toggle)
         self._draw()
@@ -436,7 +471,7 @@ class KeySaveDialog(tk.Toplevel):
         loc_row.pack(fill="x", pady=(3, 10))
         self._loc_var = tk.StringVar(value=str(self._default_folder))
         ttk.Entry(loc_row, textvariable=self._loc_var, width=30).pack(side="left",
-                                                                        expand=True, fill="x")
+                                                                       expand=True, fill="x")
         ttk.Button(loc_row, text="Browse", style="Secondary.TButton",
                    command=self._browse_location).pack(side="right", padx=(6, 0))
 
@@ -448,7 +483,7 @@ class KeySaveDialog(tk.Toplevel):
                  text="Loss of this key makes all encrypted files permanently unrecoverable.\n"
                       "Back it up to a secure, separate location immediately.",
                  bg=c["surface"], fg=c["warning"],
-                 font=("Segoe UI", 8), wraplength=330, justify="left").pack(anchor="w", pady=(4, 0))
+                 font=("Segoe UI", 9), wraplength=330, justify="left").pack(anchor="w", pady=(4, 0))
 
         btn_row = tk.Frame(outer, bg=c["bg"])
         btn_row.pack(fill="x")
@@ -479,7 +514,7 @@ class KeySaveDialog(tk.Toplevel):
         if key_path.exists():
             if not messagebox.askyesno(
                     "File Exists",
-                    f"A key already exists at:\n{key_path}\n\n"
+                    f"A key already exists at:\n{key_path.name}\n\n"
                     "Overwriting will make files encrypted with the old key inaccessible.\n"
                     "Continue?", parent=self):
                 return
@@ -523,7 +558,7 @@ class KeySearchDialog(tk.Toplevel):
         tk.Label(outer, text=f"Key Search: {self._enc_path.name}",
                  bg=c["bg"], fg=c["fg"], font=("Segoe UI", 11, "bold")).pack(anchor="w")
         tk.Label(outer, text="Scanning for compatible key files...",
-                 bg=c["bg"], fg=c["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(2, 10))
+                 bg=c["bg"], fg=c["muted"], font=("Segoe UI", 9)).pack(anchor="w", pady=(2, 10))
 
         list_outer = tk.Frame(outer, bg=c["surface"])
         list_outer.pack(fill="x", pady=(0, 10))
@@ -532,8 +567,8 @@ class KeySearchDialog(tk.Toplevel):
                                        selectmode="browse", height=8)
         self._key_tree.heading("key_name", text="Key File")
         self._key_tree.heading("location", text="Location")
-        self._key_tree.column("key_name", width=160)
-        self._key_tree.column("location", width=280)
+        self._key_tree.column("key_name", width=180, minwidth=120)
+        self._key_tree.column("location", width=300, minwidth=180)
         ks = ttk.Scrollbar(list_outer, orient="vertical", command=self._key_tree.yview)
         self._key_tree.configure(yscrollcommand=ks.set)
         self._key_tree.pack(side="left", fill="x", expand=True)
@@ -543,7 +578,7 @@ class KeySearchDialog(tk.Toplevel):
         search_row = tk.Frame(outer, bg=c["bg"])
         search_row.pack(fill="x", pady=(0, 10))
         tk.Label(search_row, text="Search more locations:", bg=c["bg"], fg=c["muted"],
-                 font=("Segoe UI", 8)).pack(side="left", padx=(0, 6))
+                 font=("Segoe UI", 9)).pack(side="left", padx=(0, 6))
         ttk.Entry(search_row, textvariable=self._search_var, width=24).pack(side="left",
                                                                               expand=True, fill="x")
         ttk.Button(search_row, text="Browse", style="Secondary.TButton",
@@ -633,73 +668,106 @@ class ContextMenu(tk.Menu):
             self._tree.selection_set(row)
 
         self.delete(0, "end")
+        path = pathlib.Path(row)
+        is_dir = path.is_dir()
 
         if self._tree_type == "plain":
-            self.add_command(label="Encrypt Selected",
-                             command=self._app._initiate_encrypt)
-            self.add_separator()
-            self.add_command(label="Rename",
-                             command=lambda: self._rename_file(row))
-            self.add_command(label="Move to...",
-                             command=lambda: self._move_file(row))
-            self.add_command(label="Compress (zip)",
-                             command=lambda: self._compress_file(row))
-            self.add_separator()
-            self.add_command(label="Properties",
-                             command=lambda: self._show_properties(row))
-            self.add_separator()
-            self.add_command(label="Remove from list",
-                             command=lambda: self._remove_from_list(row))
-            self.add_command(label="Delete file",
-                             command=lambda: self._delete_file(row))
-
+            if is_dir:
+                self._build_folder_menu(row)
+            else:
+                self._build_plain_file_menu(row)
         elif self._tree_type == "enc":
-            self.add_command(label="Decrypt Selected",
-                             command=self._app._initiate_decrypt)
-            self.add_command(label="Find Key",
-                             command=lambda: self._find_key(row))
-            self.add_separator()
-            self.add_command(label="Rename",
-                             command=lambda: self._rename_file(row))
-            self.add_command(label="Move to...",
-                             command=lambda: self._move_file(row))
-            self.add_command(label="Compress (zip)",
-                             command=lambda: self._compress_file(row))
-            self.add_separator()
-            self.add_command(label="Properties",
-                             command=lambda: self._show_properties(row))
-            self.add_separator()
-            self.add_command(label="Remove from list",
-                             command=lambda: self._remove_from_list(row))
-            self.add_command(label="Delete file",
-                             command=lambda: self._delete_file(row))
-
+            self._build_enc_menu(row)
         elif self._tree_type == "keys":
-            self.add_command(label="Use for Encryption",
-                             command=lambda: self._use_for_encrypt(row))
-            self.add_command(label="Use for Decryption",
-                             command=lambda: self._use_for_decrypt(row))
-            self.add_separator()
-            self.add_command(label="Rename",
-                             command=lambda: self._rename_file(row))
-            self.add_command(label="Move to...",
-                             command=lambda: self._move_file(row))
-            self.add_separator()
-            self.add_command(label="Properties",
-                             command=lambda: self._show_properties(row))
-            self.add_separator()
-            self.add_command(label="Delete key",
-                             command=lambda: self._delete_file(row))
+            self._build_keys_menu(row)
 
         try:
             self.tk_popup(event.x_root, event.y_root)
         finally:
             self.grab_release()
 
-    def _rename_file(self, iid: str):
+    def _build_plain_file_menu(self, row):
+        self.add_command(label="Encrypt Selected",
+                         command=self._app._initiate_encrypt)
+        self.add_separator()
+        self.add_command(label="Rename",
+                         command=lambda: self._rename_item(row))
+        self.add_command(label="Move to...",
+                         command=lambda: self._move_item(row))
+        self.add_command(label="Compress (zip)",
+                         command=lambda: self._compress_file(row))
+        self.add_command(label="Secure Wipe",
+                         command=lambda: self._secure_wipe_item(row))
+        self.add_separator()
+        self.add_command(label="Properties",
+                         command=lambda: self._show_file_properties(row))
+        self.add_separator()
+        self.add_command(label="Remove from list",
+                         command=lambda: self._remove_from_list(row))
+        self.add_command(label="Delete file",
+                         command=lambda: self._delete_item(row))
+
+    def _build_folder_menu(self, row):
+        self.add_command(label="Encrypt files individually",
+                         command=lambda: self._app._add_folder_files(pathlib.Path(row)))
+        self.add_command(label="Zip folder then Encrypt",
+                         command=lambda: self._app._zip_and_encrypt_folder(pathlib.Path(row)))
+        self.add_separator()
+        self.add_command(label="Compress (zip only)",
+                         command=lambda: self._compress_folder(row))
+        self.add_separator()
+        self.add_command(label="Rename",
+                         command=lambda: self._rename_item(row))
+        self.add_command(label="Move to...",
+                         command=lambda: self._move_item(row))
+        self.add_separator()
+        self.add_command(label="Properties",
+                         command=lambda: self._show_folder_properties(row))
+
+    def _build_enc_menu(self, row):
+        self.add_command(label="Decrypt Selected",
+                         command=self._app._initiate_decrypt)
+        self.add_command(label="Find Key",
+                         command=lambda: self._find_key(row))
+        self.add_separator()
+        self.add_command(label="Rename",
+                         command=lambda: self._rename_item(row))
+        self.add_command(label="Move to...",
+                         command=lambda: self._move_item(row))
+        self.add_command(label="Compress (zip)",
+                         command=lambda: self._compress_file(row))
+        self.add_command(label="Secure Wipe",
+                         command=lambda: self._secure_wipe_item(row))
+        self.add_separator()
+        self.add_command(label="Properties",
+                         command=lambda: self._show_file_properties(row))
+        self.add_separator()
+        self.add_command(label="Remove from list",
+                         command=lambda: self._remove_from_list(row))
+        self.add_command(label="Delete file",
+                         command=lambda: self._delete_item(row))
+
+    def _build_keys_menu(self, row):
+        self.add_command(label="Use for Encryption",
+                         command=lambda: self._use_for_encrypt(row))
+        self.add_command(label="Use for Decryption",
+                         command=lambda: self._use_for_decrypt(row))
+        self.add_separator()
+        self.add_command(label="Rename",
+                         command=lambda: self._rename_item(row))
+        self.add_command(label="Move to...",
+                         command=lambda: self._move_item(row))
+        self.add_separator()
+        self.add_command(label="Properties",
+                         command=lambda: self._show_file_properties(row))
+        self.add_separator()
+        self.add_command(label="Delete key",
+                         command=lambda: self._delete_item(row))
+
+    def _rename_item(self, iid: str):
         path = pathlib.Path(iid)
         if not path.exists():
-            messagebox.showerror("Not Found", "File no longer exists.")
+            messagebox.showerror("Not Found", "Item no longer exists.")
             return
         new_name = simpledialog.askstring(
             "Rename",
@@ -712,21 +780,21 @@ class ContextMenu(tk.Menu):
         dest = path.parent / new_name
         if dest.exists():
             messagebox.showerror("Name Taken",
-                                  f"A file named '{new_name}' already exists in this folder.")
+                                  f"'{new_name}' already exists in this folder.")
             return
         try:
             path.rename(dest)
             self._app._append_log(f"Renamed: {path.name} -> {dest.name}")
             self._app._refresh_file_list()
         except Exception:
-            messagebox.showerror("Error", "Could not rename the file.")
+            messagebox.showerror("Error", "Could not rename the item.")
 
-    def _move_file(self, iid: str):
+    def _move_item(self, iid: str):
         path = pathlib.Path(iid)
         if not path.exists():
-            messagebox.showerror("Not Found", "File no longer exists.")
+            messagebox.showerror("Not Found", "Item no longer exists.")
             return
-        dest_dir = filedialog.askdirectory(title="Move file to...",
+        dest_dir = filedialog.askdirectory(title="Move to...",
                                             initialdir=str(path.parent))
         if not dest_dir:
             return
@@ -740,7 +808,7 @@ class ContextMenu(tk.Menu):
             self._app._append_log(f"Moved: {path.name} -> {dest_dir}")
             self._app._refresh_file_list()
         except Exception:
-            messagebox.showerror("Error", "Could not move the file.")
+            messagebox.showerror("Error", "Could not move the item.")
 
     def _compress_file(self, iid: str):
         path = pathlib.Path(iid)
@@ -760,7 +828,41 @@ class ContextMenu(tk.Menu):
         except Exception:
             messagebox.showerror("Error", "Could not compress the file.")
 
-    def _show_properties(self, iid: str):
+    def _compress_folder(self, iid: str):
+        path = pathlib.Path(iid)
+        if not path.exists():
+            messagebox.showerror("Not Found", "Folder no longer exists.")
+            return
+        zip_path = path.parent / (path.name + ".zip")
+        if zip_path.exists():
+            if not messagebox.askyesno("Overwrite?",
+                                        f"'{zip_path.name}' already exists.\nOverwrite?"):
+                return
+        try:
+            self._app.engine.zip_folder(path, zip_path)
+            self._app._append_log(f"Folder compressed: {path.name} -> {zip_path.name}")
+            self._app._refresh_file_list()
+        except Exception:
+            messagebox.showerror("Error", "Could not compress the folder.")
+
+    def _secure_wipe_item(self, iid: str):
+        path = pathlib.Path(iid)
+        if not path.exists():
+            messagebox.showerror("Not Found", "File no longer exists.")
+            return
+        if not messagebox.askyesno(
+                "Secure Wipe",
+                f"Securely wipe (3-pass overwrite then delete):\n{path.name}\n\n"
+                "This cannot be undone."):
+            return
+        try:
+            self._app.engine.secure_wipe(path)
+            self._app._append_log(f"Secure wiped: {path.name}")
+            self._app._refresh_file_list()
+        except Exception:
+            messagebox.showerror("Error", "Secure wipe failed.")
+
+    def _show_file_properties(self, iid: str):
         path = pathlib.Path(iid)
         c = self._app._colors
         if not path.exists():
@@ -796,12 +898,48 @@ class ContextMenu(tk.Menu):
         ttk.Button(f, text="Close", style="Secondary.TButton",
                    command=win.destroy).pack(anchor="e", pady=(14, 0))
 
+    def _show_folder_properties(self, iid: str):
+        path = pathlib.Path(iid)
+        c = self._app._colors
+        if not path.exists():
+            messagebox.showerror("Not Found", "Folder no longer exists.")
+            return
+        all_items = list(path.rglob("*"))
+        file_count = sum(1 for x in all_items if x.is_file())
+        dir_count = sum(1 for x in all_items if x.is_dir())
+        total_size = sum(x.stat().st_size for x in all_items if x.is_file())
+        size_str = (f"{total_size} bytes" if total_size < 1024
+                    else f"{total_size / 1024:.1f} KB" if total_size < 1024 ** 2
+                    else f"{total_size / 1024 ** 2:.2f} MB")
+        s = path.stat()
+        mtime = datetime.datetime.fromtimestamp(s.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        info = (f"Name:        {path.name}\n"
+                f"Location:    {path.parent}\n"
+                f"Files:       {file_count}\n"
+                f"Subfolders:  {dir_count}\n"
+                f"Total size:  {size_str}\n"
+                f"Modified:    {mtime}")
+        win = tk.Toplevel(self._app)
+        win.title("Folder Properties")
+        win.resizable(False, False)
+        win.configure(bg=c["bg"])
+        win.grab_set()
+        win.transient(self._app)
+        f = tk.Frame(win, bg=c["bg"], padx=20, pady=18)
+        f.pack()
+        tk.Label(f, text=ICON_FOLDER + "  " + path.name, bg=c["bg"], fg=c["fg"],
+                 font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 8))
+        tk.Label(f, text=info, bg=c["bg"], fg=c["muted"],
+                 font=("Courier", 9), justify="left").pack(anchor="w")
+        ttk.Button(f, text="Close", style="Secondary.TButton",
+                   command=win.destroy).pack(anchor="e", pady=(14, 0))
+
     def _remove_from_list(self, iid: str):
         self._tree.delete(iid)
 
-    def _delete_file(self, iid: str):
+    def _delete_item(self, iid: str):
         path = pathlib.Path(iid)
-        if not messagebox.askyesno("Delete File",
+        if not messagebox.askyesno("Delete",
                                     f"Permanently delete:\n{path.name}\n\nThis cannot be undone."):
             return
         try:
@@ -837,7 +975,7 @@ class KeyInfoLabel(tk.Frame):
                                    font=("Segoe UI", 9, "bold"), anchor="w")
         self._name_lbl.pack(anchor="w")
         self._path_lbl = tk.Label(self, bg=colors["surface"], fg=colors["muted"],
-                                   font=("Segoe UI", 7), anchor="w")
+                                   font=("Segoe UI", 8), anchor="w")
         self._path_lbl.pack(anchor="w")
 
     def set_key(self, key_path_str: str):
@@ -871,20 +1009,20 @@ class MemocryApp(tk.Tk):
 
         self._apply_theme()
         self._build_layout()
-        self._auto_size_window()
+        self._size_window_once()
         self._refresh_file_list()
         self._poll_operation_queue()
 
-    def _auto_size_window(self):
+    def _size_window_once(self):
         self.update_idletasks()
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        w = min(max(self.winfo_reqwidth() + 80, 1120), screen_w - 60)
-        h = min(max(self.winfo_reqheight() + 80, 760), screen_h - 60)
+        w = min(max(self.winfo_reqwidth() + 80, 1200), screen_w - 60)
+        h = min(max(self.winfo_reqheight() + 80, 780), screen_h - 60)
         x = (screen_w - w) // 2
         y = (screen_h - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
-        self.minsize(980, 680)
+        self.minsize(1100, 700)
 
     def _apply_theme(self):
         style = ttk.Style(self)
@@ -898,12 +1036,18 @@ class MemocryApp(tk.Tk):
         success = "#a6e3a1"
         danger = "#f38ba8"
         warning = "#fab387"
+        plain_color = "#a6e3a1"
+        enc_color = "#c9a0ff"
+        key_color = "#fab387"
 
         self.configure(bg=bg)
         self._colors = {
             "bg": bg, "surface": surface, "accent": accent,
             "accent_hover": accent_hover, "fg": fg, "muted": muted,
             "success": success, "danger": danger, "warning": warning,
+            "plain_color": plain_color,
+            "enc_color": enc_color,
+            "key_color": key_color,
         }
 
         style.configure(".", background=bg, foreground=fg, font=("Segoe UI", 10))
@@ -919,24 +1063,24 @@ class MemocryApp(tk.Tk):
                         insertcolor=fg, borderwidth=1, relief="flat")
         style.map("TEntry", fieldbackground=[("focus", "#3a3a52")])
         style.configure("Treeview", background=surface, foreground=fg,
-                        fieldbackground=surface, rowheight=24, font=("Segoe UI", 9))
+                        fieldbackground=surface, rowheight=26, font=("Segoe UI", 9))
         style.configure("Treeview.Heading", background="#3a3a52", foreground=accent,
                         font=("Segoe UI", 9, "bold"), relief="flat")
         style.map("Treeview", background=[("selected", accent)],
                   foreground=[("selected", "#ffffff")])
         style.configure("Accent.TButton", background=accent, foreground="#ffffff",
-                        font=("Segoe UI", 10, "bold"), relief="flat", padding=(12, 7))
+                        font=("Segoe UI", 9, "bold"), relief="flat", padding=(10, 6))
         style.map("Accent.TButton",
                   background=[("active", accent_hover), ("disabled", muted)],
                   foreground=[("disabled", "#888888")])
         style.configure("Secondary.TButton", background=surface, foreground=fg,
-                        font=("Segoe UI", 9), relief="flat", padding=(9, 6))
+                        font=("Segoe UI", 9), relief="flat", padding=(8, 5))
         style.map("Secondary.TButton", background=[("active", "#3a3a52")])
         style.configure("Danger.TButton", background=danger, foreground="#1e1e2e",
-                        font=("Segoe UI", 9, "bold"), relief="flat", padding=(9, 6))
+                        font=("Segoe UI", 9, "bold"), relief="flat", padding=(8, 5))
         style.map("Danger.TButton", background=[("active", "#ff8fa8")])
         style.configure("Success.TButton", background=success, foreground="#1e1e2e",
-                        font=("Segoe UI", 10, "bold"), relief="flat", padding=(12, 7))
+                        font=("Segoe UI", 9, "bold"), relief="flat", padding=(10, 6))
         style.map("Success.TButton", background=[("active", "#c3f0be")])
         style.configure("TProgressbar", troughcolor=surface, background=accent,
                         thickness=6, borderwidth=0)
@@ -946,25 +1090,20 @@ class MemocryApp(tk.Tk):
         c = self._colors
 
         self._build_top_bar()
-
         ttk.Separator(self, orient="horizontal").pack(fill="x")
 
         header = tk.Frame(self, bg=c["bg"], padx=20, pady=8)
         header.pack(fill="x")
 
-        left_header = tk.Frame(header, bg=c["bg"])
-        left_header.pack(side="left")
-        tk.Label(left_header, text="memocry", bg=c["bg"], fg=c["fg"],
+        tk.Label(header, text="memocry", bg=c["bg"], fg=c["fg"],
                  font=("Segoe UI", 16, "bold")).pack(side="left")
-        ttk.Button(left_header, text="Refresh", style="Secondary.TButton",
-                   command=self._refresh_file_list).pack(side="left", padx=(12, 0))
 
         folder_frame = tk.Frame(header, bg=c["bg"])
         folder_frame.pack(side="right")
         tk.Label(folder_frame, text="Family Folder:", bg=c["bg"], fg=c["muted"],
                  font=("Segoe UI", 9)).pack(side="left", padx=(0, 6))
         self.folder_var = tk.StringVar(value=str(self.family_folder))
-        ttk.Entry(folder_frame, textvariable=self.folder_var, width=32).pack(side="left",
+        ttk.Entry(folder_frame, textvariable=self.folder_var, width=36).pack(side="left",
                                                                                padx=(0, 4))
         ttk.Button(folder_frame, text="Browse", style="Secondary.TButton",
                    command=self._browse_folder).pack(side="left")
@@ -972,6 +1111,20 @@ class MemocryApp(tk.Tk):
                    command=self._add_folder_to_encrypt).pack(side="left", padx=(4, 0))
         ttk.Button(folder_frame, text="Set", style="Secondary.TButton",
                    command=self._set_family_folder).pack(side="left", padx=(4, 0))
+
+        ttk.Separator(self, orient="horizontal").pack(fill="x", side="bottom")
+        status_bar = tk.Frame(self, bg=c["surface"], padx=16, pady=0)
+        status_bar.pack(fill="x", side="bottom")
+
+        self.status_var = tk.StringVar(value="Ready.")
+        tk.Label(status_bar, textvariable=self.status_var, bg=c["surface"], fg=c["muted"],
+                 font=("Segoe UI", 9)).pack(side="left", pady=6)
+
+        self.progress_var = tk.DoubleVar(value=0)
+        self._progress_bar = ttk.Progressbar(status_bar, variable=self.progress_var,
+                                              maximum=100, length=200, style="TProgressbar")
+        self._progress_bar.pack(side="right", pady=6)
+        self._progress_bar.pack_forget()
 
         ttk.Separator(self, orient="horizontal").pack(fill="x")
 
@@ -987,27 +1140,13 @@ class MemocryApp(tk.Tk):
         self._build_left_panel(left, c)
         self._build_right_panel(right, c)
 
-        ttk.Separator(self, orient="horizontal").pack(fill="x")
-        status_bar = tk.Frame(self, bg=c["surface"], padx=16, pady=0)
-        status_bar.pack(fill="x", side="bottom")
-
-        self.status_var = tk.StringVar(value="Ready.")
-        tk.Label(status_bar, textvariable=self.status_var, bg=c["surface"], fg=c["muted"],
-                 font=("Segoe UI", 9)).pack(side="left", pady=6)
-
-        self.progress_var = tk.DoubleVar(value=0)
-        self._progress_bar = ttk.Progressbar(status_bar, variable=self.progress_var,
-                                              maximum=100, length=200, style="TProgressbar")
-        self._progress_bar.pack(side="right", pady=6, padx=(0, 0))
-        self._progress_bar.pack_forget()
-
     def _build_top_bar(self):
         c = self._colors
         bar = tk.Frame(self, bg=c["surface"], padx=14, pady=7)
         bar.pack(fill="x")
 
         tk.Label(bar, text="Session:", bg=c["surface"], fg=c["muted"],
-                 font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 12))
+                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 12))
 
         toggles = [
             ("Delete source after encrypt", "_toggle_delete_after_encrypt"),
@@ -1025,7 +1164,7 @@ class MemocryApp(tk.Tk):
         tk.Frame(bar, bg="#3a3a52", width=1).pack(side="left", fill="y", padx=(4, 12))
 
         tk.Label(bar, text="Log", bg=c["surface"], fg=c["muted"],
-                 font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 6))
+                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 6))
         self._log_open = False
         self._log_btn = ttk.Button(bar, text="Show", style="Secondary.TButton",
                                     command=self._toggle_log_panel)
@@ -1039,36 +1178,36 @@ class MemocryApp(tk.Tk):
 
         plain_hdr = tk.Frame(parent, bg=c["bg"])
         plain_hdr.grid(row=0, column=0, sticky="ew", pady=(0, 4), padx=(0, 6))
-        tk.Label(plain_hdr, text="Plain Files", bg=c["bg"], fg=c["fg"],
-                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        tk.Label(plain_hdr, text=ICON_FILE + "  Plain Files", bg=c["bg"],
+                 fg=c["plain_color"], font=("Segoe UI", 10, "bold")).pack(side="left")
         tk.Label(plain_hdr, text="  Ctrl/Shift+click", bg=c["bg"], fg=c["muted"],
-                 font=("Segoe UI", 7)).pack(side="left")
+                 font=("Segoe UI", 8)).pack(side="left")
 
         enc_hdr = tk.Frame(parent, bg=c["bg"])
         enc_hdr.grid(row=0, column=1, sticky="ew", pady=(0, 4), padx=(0, 6))
-        tk.Label(enc_hdr, text="Encrypted Files", bg=c["bg"], fg=c["fg"],
-                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        tk.Label(enc_hdr, text=ICON_ENCRYPTED + "  Encrypted Files", bg=c["bg"],
+                 fg=c["enc_color"], font=("Segoe UI", 10, "bold")).pack(side="left")
         tk.Label(enc_hdr, text="  Ctrl/Shift+click", bg=c["bg"], fg=c["muted"],
-                 font=("Segoe UI", 7)).pack(side="left")
+                 font=("Segoe UI", 8)).pack(side="left")
 
         key_hdr = tk.Frame(parent, bg=c["bg"])
         key_hdr.grid(row=0, column=2, sticky="ew", pady=(0, 4))
-        tk.Label(key_hdr, text="Detected Keys", bg=c["bg"], fg=c["fg"],
-                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        tk.Label(key_hdr, text=ICON_KEY + "  Detected Keys", bg=c["bg"],
+                 fg=c["key_color"], font=("Segoe UI", 10, "bold")).pack(side="left")
 
         plain_outer = tk.Frame(parent, bg=c["surface"])
         plain_outer.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
-        plain_cols = ("type", "name", "ext", "size")
+        plain_cols = ("icon", "name", "ext", "size")
         self.plain_tree = ttk.Treeview(plain_outer, columns=plain_cols,
                                         show="headings", selectmode="extended")
-        self.plain_tree.heading("type", text="")
+        self.plain_tree.heading("icon", text="")
         self.plain_tree.heading("name", text="Name")
         self.plain_tree.heading("ext", text="Ext")
         self.plain_tree.heading("size", text="Size")
-        self.plain_tree.column("type", width=30, minwidth=30, anchor="center", stretch=False)
-        self.plain_tree.column("name", width=160, minwidth=100)
-        self.plain_tree.column("ext", width=42, minwidth=36, anchor="center", stretch=False)
-        self.plain_tree.column("size", width=54, anchor="e", stretch=False)
+        self.plain_tree.column("icon", width=34, minwidth=34, anchor="center", stretch=False)
+        self.plain_tree.column("name", width=190, minwidth=150)
+        self.plain_tree.column("ext", width=56, minwidth=46, anchor="center", stretch=False)
+        self.plain_tree.column("size", width=62, minwidth=52, anchor="e", stretch=False)
         ps = ttk.Scrollbar(plain_outer, orient="vertical", command=self.plain_tree.yview)
         self.plain_tree.configure(yscrollcommand=ps.set)
         self.plain_tree.pack(side="left", fill="both", expand=True)
@@ -1077,19 +1216,19 @@ class MemocryApp(tk.Tk):
 
         enc_outer = tk.Frame(parent, bg=c["surface"])
         enc_outer.grid(row=1, column=1, sticky="nsew", padx=(0, 6))
-        enc_cols = ("type", "file", "ext", "key_status", "size")
+        enc_cols = ("icon", "file", "ext", "key_status", "size")
         self.file_tree = ttk.Treeview(enc_outer, columns=enc_cols,
                                        show="headings", selectmode="extended")
-        self.file_tree.heading("type", text="")
+        self.file_tree.heading("icon", text="")
         self.file_tree.heading("file", text="Name")
         self.file_tree.heading("ext", text="Ext")
         self.file_tree.heading("key_status", text="Key")
         self.file_tree.heading("size", text="Size")
-        self.file_tree.column("type", width=30, minwidth=30, anchor="center", stretch=False)
-        self.file_tree.column("file", width=140, minwidth=90)
-        self.file_tree.column("ext", width=42, minwidth=36, anchor="center", stretch=False)
-        self.file_tree.column("key_status", width=52, anchor="center", stretch=False)
-        self.file_tree.column("size", width=54, anchor="e", stretch=False)
+        self.file_tree.column("icon", width=34, minwidth=34, anchor="center", stretch=False)
+        self.file_tree.column("file", width=170, minwidth=130)
+        self.file_tree.column("ext", width=56, minwidth=46, anchor="center", stretch=False)
+        self.file_tree.column("key_status", width=64, minwidth=54, anchor="center", stretch=False)
+        self.file_tree.column("size", width=62, minwidth=52, anchor="e", stretch=False)
         es = ttk.Scrollbar(enc_outer, orient="vertical", command=self.file_tree.yview)
         self.file_tree.configure(yscrollcommand=es.set)
         self.file_tree.pack(side="left", fill="both", expand=True)
@@ -1099,15 +1238,17 @@ class MemocryApp(tk.Tk):
 
         key_outer = tk.Frame(parent, bg=c["surface"])
         key_outer.grid(row=1, column=2, sticky="nsew")
-        key_cols = ("key_name", "key_size", "key_modified")
+        key_cols = ("icon", "key_name", "key_size", "key_modified")
         self.key_tree = ttk.Treeview(key_outer, columns=key_cols,
                                       show="headings", selectmode="browse")
+        self.key_tree.heading("icon", text="")
         self.key_tree.heading("key_name", text="Key File")
         self.key_tree.heading("key_size", text="Size")
         self.key_tree.heading("key_modified", text="Modified")
-        self.key_tree.column("key_name", width=120, minwidth=80)
-        self.key_tree.column("key_size", width=50, anchor="e", stretch=False)
-        self.key_tree.column("key_modified", width=110, minwidth=80, anchor="center")
+        self.key_tree.column("icon", width=34, minwidth=34, anchor="center", stretch=False)
+        self.key_tree.column("key_name", width=150, minwidth=110)
+        self.key_tree.column("key_size", width=56, minwidth=46, anchor="e", stretch=False)
+        self.key_tree.column("key_modified", width=128, minwidth=108, anchor="center")
         ks2 = ttk.Scrollbar(key_outer, orient="vertical", command=self.key_tree.yview)
         self.key_tree.configure(yscrollcommand=ks2.set)
         self.key_tree.pack(side="left", fill="both", expand=True)
@@ -1123,7 +1264,7 @@ class MemocryApp(tk.Tk):
         ttk.Button(log_hdr, text="Clear", style="Secondary.TButton",
                    command=self._clear_log).pack(side="right")
         self.log_text = tk.Text(self._log_panel_frame, height=4, state="disabled",
-                                bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8),
+                                bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9),
                                 relief="flat", borderwidth=0, wrap="word",
                                 insertbackground=c["fg"], padx=6, pady=4)
         log_s = ttk.Scrollbar(self._log_panel_frame, orient="vertical",
@@ -1136,13 +1277,13 @@ class MemocryApp(tk.Tk):
     def _build_right_panel(self, parent, c):
         tk.Label(parent, text="Operations", bg=c["bg"], fg=c["fg"],
                  font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 4))
-        ttk.Button(parent, text="Refresh", style="Secondary.TButton",
-                   command=self._refresh_file_list).pack(anchor="w", pady=(0, 8))
+        ttk.Button(parent, text="Refresh Files", style="Secondary.TButton",
+                   command=self._refresh_file_list).pack(anchor="w", pady=(0, 10))
 
         enc_card = tk.Frame(parent, bg=c["surface"], padx=14, pady=12)
         enc_card.pack(fill="x", pady=(0, 8))
-        tk.Label(enc_card, text="ENCRYPT", bg=c["surface"], fg=c["accent"],
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(enc_card, text="ENCRYPT", bg=c["surface"], fg=c["enc_color"],
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
         tk.Frame(enc_card, bg="#3a3a52", height=1).pack(fill="x", pady=(5, 8))
         tk.Label(enc_card, text="Key file:", bg=c["surface"], fg=c["muted"],
                  font=("Segoe UI", 9)).pack(anchor="w")
@@ -1150,14 +1291,16 @@ class MemocryApp(tk.Tk):
         enc_key_row.pack(fill="x", pady=(2, 4))
         self.enc_key_var = tk.StringVar()
         self.enc_key_var.trace_add("write", self._on_enc_key_changed)
-        ttk.Entry(enc_key_row, textvariable=self.enc_key_var, width=15).pack(side="left",
+        ttk.Entry(enc_key_row, textvariable=self.enc_key_var, width=13).pack(side="left",
                                                                                expand=True, fill="x")
+        ttk.Button(enc_key_row, text="x", style="Secondary.TButton", width=2,
+                   command=self._clear_enc_key).pack(side="right", padx=(2, 0))
         ttk.Button(enc_key_row, text="...", style="Secondary.TButton", width=3,
-                   command=self._browse_enc_key).pack(side="right", padx=(4, 0))
+                   command=self._browse_enc_key).pack(side="right", padx=(2, 0))
         self._enc_key_info = KeyInfoLabel(enc_card, c)
         self._enc_key_info.pack(fill="x", pady=(0, 6))
         tk.Label(enc_card, text="Select rows or browse files",
-                 bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 4))
+                 bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 4))
         ttk.Button(enc_card, text="Browse Files", style="Secondary.TButton",
                    command=self._browse_plain_files_manual).pack(fill="x", pady=(0, 4))
         ttk.Button(enc_card, text="Encrypt Selected", style="Accent.TButton",
@@ -1165,8 +1308,8 @@ class MemocryApp(tk.Tk):
 
         dec_card = tk.Frame(parent, bg=c["surface"], padx=14, pady=12)
         dec_card.pack(fill="x", pady=(0, 8))
-        tk.Label(dec_card, text="DECRYPT", bg=c["surface"], fg=c["success"],
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(dec_card, text="DECRYPT", bg=c["surface"], fg=c["plain_color"],
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
         tk.Frame(dec_card, bg="#3a3a52", height=1).pack(fill="x", pady=(5, 8))
         tk.Label(dec_card, text="Key file:", bg=c["surface"], fg=c["muted"],
                  font=("Segoe UI", 9)).pack(anchor="w")
@@ -1174,14 +1317,16 @@ class MemocryApp(tk.Tk):
         dec_key_row.pack(fill="x", pady=(2, 4))
         self.dec_key_var = tk.StringVar()
         self.dec_key_var.trace_add("write", self._on_dec_key_changed)
-        ttk.Entry(dec_key_row, textvariable=self.dec_key_var, width=15).pack(side="left",
+        ttk.Entry(dec_key_row, textvariable=self.dec_key_var, width=13).pack(side="left",
                                                                                expand=True, fill="x")
+        ttk.Button(dec_key_row, text="x", style="Secondary.TButton", width=2,
+                   command=self._clear_dec_key).pack(side="right", padx=(2, 0))
         ttk.Button(dec_key_row, text="...", style="Secondary.TButton", width=3,
-                   command=self._browse_dec_key).pack(side="right", padx=(4, 0))
+                   command=self._browse_dec_key).pack(side="right", padx=(2, 0))
         self._dec_key_info = KeyInfoLabel(dec_card, c)
         self._dec_key_info.pack(fill="x", pady=(0, 6))
         tk.Label(dec_card, text="Select rows or browse files",
-                 bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 4))
+                 bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 4))
         ttk.Button(dec_card, text="Browse Files", style="Secondary.TButton",
                    command=self._browse_enc_files_manual).pack(fill="x", pady=(0, 4))
         ttk.Button(dec_card, text="Decrypt Selected", style="Success.TButton",
@@ -1189,23 +1334,33 @@ class MemocryApp(tk.Tk):
 
         key_card = tk.Frame(parent, bg=c["surface"], padx=14, pady=12)
         key_card.pack(fill="x", pady=(0, 8))
-        tk.Label(key_card, text="KEY MANAGEMENT", bg=c["surface"], fg=c["warning"],
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(key_card, text="KEY MANAGEMENT", bg=c["surface"], fg=c["key_color"],
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
         tk.Frame(key_card, bg="#3a3a52", height=1).pack(fill="x", pady=(5, 8))
         ttk.Button(key_card, text="Generate & Save Key", style="Secondary.TButton",
-                   command=self._generate_standalone_key).pack(fill="x", pady=(0, 6))
+                   command=self._generate_standalone_key).pack(fill="x", pady=(0, 4))
+        ttk.Button(key_card, text="Remove Selected Key", style="Secondary.TButton",
+                   command=self._delete_selected_key).pack(fill="x", pady=(0, 4))
         ttk.Button(key_card, text="Delete All Detected Keys", style="Danger.TButton",
                    command=self._delete_all_keys).pack(fill="x", pady=(0, 8))
         tk.Label(key_card,
                  text="Loss of a key makes encrypted files\npermanently unrecoverable.\nBack up to a secure location.",
                  bg=c["surface"], fg=c["warning"],
-                 font=("Segoe UI", 8), justify="left").pack(anchor="w")
+                 font=("Segoe UI", 9), justify="left").pack(anchor="w")
+
+
 
     def _on_enc_key_changed(self, *_):
         self._enc_key_info.set_key(self.enc_key_var.get())
 
     def _on_dec_key_changed(self, *_):
         self._dec_key_info.set_key(self.dec_key_var.get())
+
+    def _clear_enc_key(self):
+        self.enc_key_var.set("")
+
+    def _clear_dec_key(self):
+        self.dec_key_var.set("")
 
     def _toggle_log_panel(self):
         self._log_open = not self._log_open
@@ -1250,39 +1405,45 @@ class MemocryApp(tk.Tk):
             suffix = enc_file.suffix
             stem_suffix = pathlib.Path(enc_file.stem).suffix
             ext_display = stem_suffix + suffix if stem_suffix else suffix
-            try:
-                rel = enc_file.relative_to(self.family_folder)
-                name_display = str(rel.with_suffix("").with_suffix("")) if rel.suffixes else str(rel)
-            except ValueError:
-                name_display = enc_file.stem
+            name_display = pathlib.Path(enc_file.stem).stem if stem_suffix else enc_file.stem
             self.file_tree.insert("", "end", iid=str(enc_file),
-                                   values=("F", name_display, ext_display,
+                                   values=(ICON_ENCRYPTED, name_display, ext_display,
                                            item["key_status"], size_lbl),
                                    tags=(tag,))
-        self.file_tree.tag_configure("keyed", foreground=self._colors["success"])
+
+        self.file_tree.tag_configure("keyed", foreground=self._colors["enc_color"])
         self.file_tree.tag_configure("unkeyed", foreground=self._colors["danger"])
 
         for plain_file in self.scanner.discover_plain_files():
             size_lbl = format_size(plain_file.stat().st_size)
-            try:
-                rel = plain_file.relative_to(self.family_folder)
-            except ValueError:
-                rel = plain_file
-            is_dir_item = False
             ext = plain_file.suffix
             name_no_ext = plain_file.stem
-            type_icon = "D" if is_dir_item else "F"
             self.plain_tree.insert("", "end", iid=str(plain_file),
-                                    values=(type_icon, str(rel.parent / name_no_ext)
-                                            if str(rel.parent) != "." else name_no_ext,
-                                            ext, size_lbl))
+                                    values=(ICON_FILE, name_no_ext, ext, size_lbl),
+                                    tags=("plain",))
+
+        self.plain_tree.tag_configure("plain", foreground=self._colors["plain_color"])
+
+        for d in self.scanner.discover_subfolders():
+            try:
+                file_count = sum(1 for f in d.iterdir() if f.is_file())
+                self.plain_tree.insert("", "end", iid=str(d),
+                                        values=(ICON_FOLDER, d.name, "<dir>",
+                                                f"{file_count}f"),
+                                        tags=("folder",))
+            except Exception:
+                pass
+
+        self.plain_tree.tag_configure("folder", foreground=self._colors["warning"])
 
         for kf in self.scanner.discover_key_files():
             size_lbl = format_size(kf.stat().st_size)
             mtime = datetime.datetime.fromtimestamp(kf.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
             self.key_tree.insert("", "end", iid=str(kf),
-                                  values=(kf.name, size_lbl, mtime))
+                                  values=(ICON_KEY, kf.name, size_lbl, mtime),
+                                  tags=("key",))
 
+        self.key_tree.tag_configure("key", foreground=self._colors["key_color"])
         self._set_status(f"Scanned: {self.family_folder}")
 
     def _on_enc_tree_select(self, _event):
@@ -1302,37 +1463,83 @@ class MemocryApp(tk.Tk):
         if chosen:
             self.folder_var.set(chosen)
 
+    def _add_folder_files(self, folder: pathlib.Path):
+        added = 0
+        for f in sorted(folder.rglob("*")):
+            if f.is_file() and f.suffix != ENCRYPTED_EXTENSION and f.suffix != KEY_EXTENSION:
+                if f not in self._enc_manual_files:
+                    self._enc_manual_files.append(f)
+                    added += 1
+        self._append_log(f"Folder added: {folder.name} ({added} file(s) queued).")
+
+    def _zip_and_encrypt_folder(self, folder: pathlib.Path):
+        raw_key = self.enc_key_var.get().strip()
+        if not raw_key:
+            if messagebox.askyesno("No Key Selected",
+                                    "No encryption key selected.\n\nGenerate a new key now?"):
+                dialog = KeySaveDialog(self, self.family_folder, self.engine)
+                self.wait_window(dialog)
+                if dialog.result_key_path:
+                    self.enc_key_var.set(str(dialog.result_key_path))
+                    self._append_log(f"Key generated: {dialog.result_key_path.name}")
+                    self._refresh_file_list()
+            raw_key = self.enc_key_var.get().strip()
+            if not raw_key:
+                return
+
+        zip_out = folder.parent / (folder.name + ".zip")
+        try:
+            self.engine.zip_folder(folder, zip_out)
+            self._append_log(f"Folder zipped: {zip_out.name}")
+        except Exception:
+            messagebox.showerror("Zip Failed", "Could not create zip archive.")
+            return
+
+        key_path = pathlib.Path(raw_key)
+        try:
+            validated_zip = self.validator.validate_input_file(zip_out)
+            output_path = zip_out.with_name(zip_out.name + ENCRYPTED_EXTENSION)
+            validated_output = self.validator.validate_output_path(output_path)
+            validated_key = self.validator.validate_key_file(key_path)
+        except ValueError as ve:
+            messagebox.showerror("Validation Error", str(ve))
+            return
+
+        def make_task(vsrc, vout, vkey):
+            def task():
+                key_material = self.engine.load_key(vkey)
+                try:
+                    self.engine.encrypt_file(vsrc, key_material, vout)
+                finally:
+                    key_material = None
+            return task
+
+        batch = [(zip_out.name, make_task(validated_zip, validated_output, validated_key))]
+        zip_ref = validated_zip
+
+        def post_zip_encrypt():
+            try:
+                self.engine.safe_delete(zip_ref)
+                self._append_log(f"Zip deleted after encryption: {zip_ref.name}")
+            except Exception:
+                pass
+
+        self._pending_post_action = post_zip_encrypt
+        self._run_batch(batch, f"Encrypting: {zip_out.name}...")
+
     def _add_folder_to_encrypt(self):
         chosen = filedialog.askdirectory(title="Select Folder",
                                           initialdir=str(self.family_folder))
         if not chosen:
             return
         folder = pathlib.Path(chosen).resolve()
-
         choice = self._ask_folder_mode(folder.name)
         if choice is None:
             return
-
         if choice == "zip":
-            zip_out = folder.parent / (folder.name + ".zip")
-            try:
-                self.engine.zip_folder(folder, zip_out)
-            except Exception:
-                messagebox.showerror("Zip Failed", "Could not create zip archive.")
-                return
-            if zip_out not in self._enc_manual_files:
-                self._enc_manual_files.append(zip_out)
-            self._refresh_file_list()
-            self._append_log(f"Folder zipped: {zip_out.name} queued for encryption.")
-            self._append_log("Click Encrypt Selected to encrypt the zip archive.")
+            self._zip_and_encrypt_folder(folder)
         else:
-            added = 0
-            for f in sorted(folder.rglob("*")):
-                if f.is_file() and f.suffix != ENCRYPTED_EXTENSION and f.suffix != KEY_EXTENSION:
-                    if f not in self._enc_manual_files:
-                        self._enc_manual_files.append(f)
-                        added += 1
-            self._append_log(f"Folder added: {folder.name} ({added} file(s) queued).")
+            self._add_folder_files(folder)
 
     def _ask_folder_mode(self, folder_name: str):
         win = tk.Toplevel(self)
@@ -1426,8 +1633,27 @@ class MemocryApp(tk.Tk):
             self._append_log(f"Key generated: {dialog.result_key_path.name}")
             self._refresh_file_list()
             messagebox.showinfo("Key Generated",
-                                f"Key saved to:\n{dialog.result_key_path}\n\n"
+                                f"Key saved: {dialog.result_key_path.name}\n\n"
                                 "Back up this file immediately to a secure location.")
+
+    def _delete_selected_key(self):
+        sel = self.key_tree.selection()
+        if not sel:
+            messagebox.showinfo("No Key Selected",
+                                 "Select a key from the Detected Keys list first.")
+            return
+        key_path = pathlib.Path(sel[0])
+        if not messagebox.askyesno(
+                "Remove Key",
+                f"Permanently delete key:\n{key_path.name}\n\n"
+                "Files encrypted with this key will become permanently unrecoverable."):
+            return
+        try:
+            self.engine.safe_delete(key_path)
+            self._append_log(f"Key deleted: {key_path.name}")
+            self._refresh_file_list()
+        except Exception:
+            messagebox.showerror("Error", "Could not delete the key file.")
 
     def _delete_all_keys(self):
         key_files = self.scanner.discover_key_files()
@@ -1515,7 +1741,7 @@ class MemocryApp(tk.Tk):
         seen = set()
         for iid in self.plain_tree.selection():
             p = pathlib.Path(iid)
-            if p not in seen:
+            if p.is_file() and p not in seen:
                 targets.append(p)
                 seen.add(p)
         for p in self._enc_manual_files:
