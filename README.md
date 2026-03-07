@@ -9,7 +9,35 @@ A self-contained, zero-footprint Python utility for symmetric file-level encrypt
 - Python 3.10 or higher
 - `cryptography` library
 
+---
+
+## Setup
+
+### Option A — Virtual environment (recommended)
+
+```bash
+python -m venv venv
 ```
+
+Activate it:
+
+```bash
+# Windows
+venv\Scripts\activate
+
+# macOS / Linux
+source venv/bin/activate
+```
+
+Install the dependency:
+
+```bash
+pip install cryptography
+```
+
+### Option B — System-wide
+
+```bash
 pip install cryptography
 ```
 
@@ -17,7 +45,7 @@ pip install cryptography
 
 ## Usage
 
-```
+```bash
 python memocry.py
 ```
 
@@ -25,27 +53,23 @@ On first launch memocry opens in your current working directory as the **Family 
 
 ---
 
-## How it Works
+## Core Workflow
 
-### Family Folder
-
-The Family Folder is the root directory memocry watches. All three file panels — Plain Files, Encrypted Files, and Detected Keys — are populated by scanning this folder recursively. You can change it at any time using the **Browse** and **Set** controls in the header.
-
-### Encrypting Files
+### Encrypt
 
 1. Select files in the **Plain Files** panel (Ctrl/Shift+click for multi-select), or click **Browse Files** in the ENCRYPT panel.
-2. Select or generate a key in the ENCRYPT panel.
-3. Click **Encrypt Selected**.
+2. Select or generate a key. If no key is loaded, memocry will offer to generate one automatically.
+3. Click **Encrypt Selected**. Each file becomes `filename.ext.enc`.
 
-### Decrypting Files
+### Decrypt
 
 1. Select files in the **Encrypted Files** panel, or click **Browse Files** in the DECRYPT panel.
-2. Select a key in the DECRYPT panel (it auto-fills if a paired key is detected).
+2. Select a key. If a paired key exists in the same folder, it auto-fills.
 3. Click **Decrypt Selected**.
 
 ### Keys
 
-Keys are standard Fernet keys stored as `.key` files. Generate them with **Generate & Save Key** in KEY MANAGEMENT or from within the ENCRYPT panel when no key is loaded. **Back up every key to a separate secure location immediately.** Loss of a key makes all files encrypted with it permanently unrecoverable.
+Keys are Fernet keys stored as `.key` files. Generate them via **Generate & Save Key** in the KEY MANAGEMENT panel or when prompted during encryption. **Back up every key to a separate secure location immediately.** Loss of a key makes all files encrypted with it permanently and irreversibly unrecoverable.
 
 ---
 
@@ -53,78 +77,84 @@ Keys are standard Fernet keys stored as `.key` files. Generate them with **Gener
 
 ### File Panels
 
-| Panel | Color | Shows |
+| Panel | Color | Content |
 |---|---|---|
-| 📄 Plain Files | Green | Regular files and subfolders |
-| 🔒 Encrypted Files | Purple | `.enc` files with key-pairing status |
-| 🗝 Detected Keys | Orange | `.key` files in the family folder |
+| 📄 Plain Files | Green | Regular files and subfolders in the family folder |
+| 🔒 Encrypted Files | Purple | `.enc` files with key-pairing status (Found / Missing) |
+| 🗝 Detected Keys | Orange | `.key` files discovered in the family folder |
 
-- **Folders** appear in the Plain Files panel with a 📁 icon and file count
-- Column widths are fixed and never auto-resize the window
-- File names are shown without full path — name only
+- **Folders** appear in the Plain Files panel with a 📁 icon and file count, distinct from regular files
+- File names display without full path — name only, extension in a dedicated column
+- Column widths are fixed; the window never auto-resizes after launch
+
+### Folder Encryption
+
+The **Add Folder** button and the folder right-click menu offer two modes:
+
+- **Encrypt each file individually** — queues every plain file inside the folder for the next encrypt operation
+- **Zip folder then Encrypt** — creates a `.zip` archive of the entire folder, encrypts it immediately using the loaded key, then deletes the intermediate zip automatically
+
+### Batch Operations
+
+All encrypt and decrypt actions are batched and run on a background thread. The GUI remains fully responsive during long operations. A progress bar appears during processing and disappears on completion.
 
 ### Right-click Context Menus
 
-Files and folders support different context menus:
+Context menus are context-aware — files, folders, encrypted files, and keys each have their own set of actions.
 
-**Plain files:** Encrypt, Rename, Move to, Compress (zip), Secure Wipe, Properties, Remove from list, Delete
+**Plain files:** Encrypt Selected, Rename, Move to, Compress (zip), Secure Wipe, Properties, Remove from list, Delete
 
 **Folders:** Encrypt files individually, Zip folder then Encrypt, Compress (zip only), Rename, Move to, Properties
 
-**Encrypted files:** Decrypt, Find Key, Rename, Move to, Compress (zip), Secure Wipe, Properties, Remove from list, Delete
+**Encrypted files:** Decrypt Selected, Find Key, Rename, Move to, Compress (zip), Secure Wipe, Properties, Remove from list, Delete
 
 **Keys:** Use for Encryption, Use for Decryption, Rename, Move to, Properties, Delete key
 
-### Add Folder
+### Key Management
 
-The **Add Folder** button lets you choose a folder and pick one of two modes:
+- **Generate & Save Key** — creates a new cryptographically secure Fernet key, lets you name it and choose where to save it
+- **Remove Selected Key** — deletes the key currently selected in the Detected Keys panel
+- **Delete All Detected Keys** — permanently deletes all `.key` files in the family folder, double-confirmed
 
-- **Encrypt each file individually** — queues all plain files from the folder for the next encrypt operation
-- **Zip folder then encrypt the zip** — creates a `.zip` archive from the folder, then immediately encrypts it using the currently loaded key; the intermediate zip is deleted after successful encryption
+### Secure Wipe
 
-### Session Toggles (top bar)
+Available via right-click on any file. Performs a **3-pass random overwrite** before deletion, making data recovery significantly harder than a standard delete. Useful before disposing of hardware or removing sensitive plaintext after encryption.
+
+### Smart Key Pairing
+
+When you select an encrypted file, memocry checks whether a matching `.key` file exists alongside it and auto-fills the DECRYPT key field. The **Find Key** context menu action searches the family folder and home directory for compatible keys if the paired key is missing.
+
+### Session Toggles
+
+All toggles are volatile — they reset to off on every launch and are never written to disk.
 
 | Toggle | Effect |
 |---|---|
 | Delete source after encrypt | Deletes original plain files after successful encryption |
 | Delete .enc after decrypt | Deletes the `.enc` file after successful decryption |
-| Delete key after encrypt | Deletes the key file after successful encryption |
-| Delete key after decrypt | Deletes the key file after successful decryption |
+| Delete key after encrypt | Deletes the key file after encryption completes |
+| Delete key after decrypt | Deletes the key file after decryption completes |
 | Extra warnings | Adds confirmation dialogs before every operation |
-| No warnings | Suppresses all optional confirmation dialogs |
+| No warnings | Suppresses all optional confirmations |
 
-Safety-critical warnings (encrypting memocry.py itself, encrypting the active key) always fire regardless of toggle state.
-
-### Key Management
-
-- **Generate & Save Key** — creates a new Fernet key and saves it to a location of your choice
-- **Remove Selected Key** — deletes the key selected in the Detected Keys panel
-- **Delete All Detected Keys** — deletes all `.key` files found in the family folder (double-confirmed)
-
-### Tools Panel
-
-- **Refresh Files** — re-scans the family folder
-- **Disk Space Info** — shows total, used, and free space for the family folder's volume
-- **Verify Key Format** — validates the Fernet format of the currently loaded key
-
-### Secure Wipe
-
-Available via right-click on any file. Performs a 3-pass random overwrite before deletion, making file recovery significantly harder than a standard delete.
+Safety-critical warnings — encrypting memocry.py itself, encrypting the active key — always fire regardless of toggle state.
 
 ### Session Log
 
-A volatile, session-only log of all operations. Accessible via the **Show/Hide** button in the top bar. Cleared automatically on exit. Never written to disk.
+A volatile in-RAM activity log recording every operation, skip, and error. Toggle visibility with **Show / Hide** in the top bar. Never written to disk. Cleared on exit.
 
 ---
 
 ## Security Model
 
-- **Fernet (AES-128-CBC + HMAC-SHA256)** — authenticated encryption; any tampering or wrong key aborts decryption immediately
-- **Atomic writes** — all files are written to a `.tmp` file first and renamed on success; partial writes never corrupt the destination
-- **System file protection** — known system paths and root-owned files are flagged before encryption
+- **Fernet (AES-128-CBC + HMAC-SHA256)** — authenticated encryption; any tampering or wrong key aborts decryption immediately with no partial output written
+- **Atomic writes** — output is written to a `.tmp` file first and renamed on success; partial writes never corrupt the destination
+- **Memory hygiene** — key material is explicitly dereferenced after use in every code path
+- **System file protection** — known system paths and root-owned files are flagged before encryption proceeds
 - **In-use detection** — files open by another process are warned about before modification
-- **No persistence** — all preferences, session state, and key material exist only in RAM during the session
-- **Separation of concerns** — the GUI never holds raw key material; the cryptographic engine is isolated
+- **No persistence** — all preferences, session state, and key material exist only in RAM; nothing is stored between sessions
+- **Path sanitization** — all user-provided paths are resolved and validated before any file operation
+- **Separation of concerns** — the GUI layer never holds raw key material; the cryptographic engine is fully isolated
 
 ---
 
@@ -132,15 +162,15 @@ A volatile, session-only log of all operations. Accessible via the **Show/Hide**
 
 ```
 memocry.py
-├── CryptographicEngine     — Fernet encrypt/decrypt, key gen, zip, secure wipe
-├── PathValidator           — input/output/key path sanitization
-├── FamilyFolderScanner     — discovers plain files, encrypted files, keys, folders
-├── BatchOperationWorker    — background thread for batch encrypt/decrypt
+├── CryptographicEngine     — Fernet encrypt/decrypt, key gen/save, zip, secure wipe
+├── PathValidator           — input/output/key path sanitization and access checks
+├── FamilyFolderScanner     — discovers plain files, encrypted files, keys, subfolders
+├── BatchOperationWorker    — background thread for all batch encrypt/decrypt jobs
 ├── ToggleButton            — session option toggle widget
-├── KeySaveDialog           — key generation dialog
-├── KeySearchDialog         — key search/match dialog
-├── ContextMenu             — right-click menus (file, folder, encrypted, key)
-├── KeyInfoLabel            — key display widget in operation panels
+├── KeySaveDialog           — key generation and save dialog
+├── KeySearchDialog         — key search and match dialog
+├── ContextMenu             — right-click menus for files, folders, encrypted files, keys
+├── KeyInfoLabel            — active key display widget in operation panels
 └── MemocryApp              — main application window and orchestration
 ```
 
@@ -149,6 +179,3 @@ memocry.py
 ## Changelog
 
 See `v0_1.3` for the latest release notes.
-
----
-
