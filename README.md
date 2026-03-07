@@ -152,6 +152,3 @@ See `v0_1.3` for the latest release notes.
 
 ---
 
-## License
-
-MIT
