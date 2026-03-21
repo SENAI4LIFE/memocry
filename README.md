@@ -13,6 +13,11 @@ A self-contained, zero-footprint Python utility for symmetric file-level encrypt
 
 ## Setup
 
+
+```bash
+apt install python3.12-venv
+sudo apt install python3-pip
+```
 ### Windows
 
 ```cmd
