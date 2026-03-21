@@ -15,8 +15,7 @@ A self-contained, zero-footprint Python utility for symmetric file-level encrypt
 
 
 ```bash
-apt install python3.12-venv
-sudo apt install python3-pip
+sudo apt install python3.12-venv python3-pip
 ```
 ### Windows
 
